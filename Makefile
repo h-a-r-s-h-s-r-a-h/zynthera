@@ -41,7 +41,8 @@ dev: env-check ## Run the API, the agent and the web app together
 	@./scripts/dev.sh
 
 test: ## Run Go tests and web unit tests
-	go test ./...
+	# -p 1: packages share one test database, so they run one at a time.
+	go test -p 1 ./...
 	cd web && npm test
 
 test-e2e: ## Run the Playwright end-to-end tests (mock mode)

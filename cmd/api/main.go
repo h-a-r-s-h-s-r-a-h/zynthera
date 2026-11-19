@@ -21,8 +21,11 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"zynthera/internal/api/appconfig"
+	"zynthera/internal/api/auth"
 	"zynthera/internal/api/httpapi"
+	"zynthera/internal/api/mail"
 	"zynthera/internal/api/store"
+	"zynthera/internal/api/store/sqlcgen"
 	"zynthera/internal/shared/config"
 	"zynthera/internal/shared/httpx"
 	"zynthera/internal/shared/logging"
@@ -102,12 +105,24 @@ func serve(ctx context.Context, log *slog.Logger, cfg appconfig.Config, args []s
 
 	log.Info("starting", "env", cfg.Env, "worker", !*noWorker, "scheduler", !*noScheduler)
 
-	router := httpapi.NewRouter(httpapi.Deps{
-		Config: cfg,
-		Logger: log,
-		DB:     pool,
-		Redis:  redisPinger{rdb},
+	router, err := httpapi.NewRouter(httpapi.Deps{
+		Config:  cfg,
+		Logger:  log,
+		DB:      pool,
+		Q:       sqlcgen.New(pool),
+		Redis:   redisPinger{rdb},
+		Limiter: auth.NewRedisLimiter(rdb),
+		Mailer: mail.SMTPSender{
+			Host: cfg.SMTPHost,
+			Port: cfg.SMTPPort,
+			User: cfg.SMTPUser,
+			Pass: cfg.SMTPPass,
+			From: cfg.MailFrom,
+		},
 	})
+	if err != nil {
+		return err
+	}
 	return httpx.Serve(ctx, log, cfg.Addr, router)
 }
 
@@ -145,9 +160,30 @@ func migrateCmd(log *slog.Logger, cfg appconfig.Config, args []string) error {
 	return nil
 }
 
-// seed creates the data a fresh install needs. It gains real content with
-// each milestone: the admin user (M1), the local host (M2), OS images (M3).
-func seed(_ context.Context, log *slog.Logger, _ appconfig.Config) error {
-	log.Info("seed: nothing to seed yet")
+// seed creates the data a fresh install needs. It is safe to run repeatedly.
+// It gains more content with each milestone: the local host (M2), OS images (M3).
+func seed(ctx context.Context, log *slog.Logger, cfg appconfig.Config) error {
+	pool, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	q := sqlcgen.New(pool)
+
+	if cfg.SeedAdminPassword == "" {
+		return errors.New("seed: ZYN_SEED_ADMIN_PASSWORD is required")
+	}
+	if n := len(cfg.SeedAdminPassword); n < auth.MinPasswordLength || n > auth.MaxPasswordLength {
+		return fmt.Errorf("seed: ZYN_SEED_ADMIN_PASSWORD must be %d to %d characters", auth.MinPasswordLength, auth.MaxPasswordLength)
+	}
+	hash, err := auth.HashPassword(cfg.SeedAdminPassword, auth.DefaultArgon2Params)
+	if err != nil {
+		return err
+	}
+	admin, err := q.UpsertAdminUser(ctx, sqlcgen.UpsertAdminUserParams{Email: cfg.SeedAdminEmail, PasswordHash: hash})
+	if err != nil {
+		return fmt.Errorf("seed admin user: %w", err)
+	}
+	log.Info("seed: admin user ready", "email", admin.Email)
 	return nil
 }

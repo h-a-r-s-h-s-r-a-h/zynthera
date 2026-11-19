@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"zynthera/internal/api/appconfig"
+	"zynthera/internal/api/auth"
 	"zynthera/internal/shared/httpx"
 	"zynthera/internal/shared/logging"
 )
@@ -20,6 +22,20 @@ import (
 type fakePinger struct{ err error }
 
 func (f fakePinger) Ping(context.Context) error { return f.err }
+
+func (f fakePinger) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("fakePinger has no transactions")
+}
+
+func mustRouter(t *testing.T, d Deps) http.Handler {
+	t.Helper()
+	d.Argon2 = auth.Argon2Params{MemoryKiB: 64, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 32}
+	h, err := NewRouter(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
 
 func testDeps(db, redis error) Deps {
 	return Deps{
@@ -43,7 +59,7 @@ func TestHealth(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := NewRouter(testDeps(tc.db, tc.redis))
+			h := mustRouter(t, testDeps(tc.db, tc.redis))
 			for _, path := range []string{"/health", "/api/health"} {
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
@@ -74,7 +90,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestNotFoundUsesEnvelope(t *testing.T) {
-	h := NewRouter(testDeps(nil, nil))
+	h := mustRouter(t, testDeps(nil, nil))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
 	if rec.Code != 404 {
