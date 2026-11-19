@@ -4,12 +4,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"zynthera/internal/agent/agentconfig"
+	"zynthera/internal/agent/driver"
+	"zynthera/internal/agent/driver/mock"
 	"zynthera/internal/agent/server"
 	"zynthera/internal/shared/config"
 	"zynthera/internal/shared/httpx"
@@ -40,6 +43,26 @@ func run(log *slog.Logger) error {
 
 	log.Info("starting", "env", cfg.Env, "version", server.Version, "vm_driver", cfg.VMDriver, "host_id", cfg.HostID)
 
-	router := server.NewRouter(server.Deps{Config: cfg, Logger: log})
+	drv, err := newDriver(cfg)
+	if err != nil {
+		return err
+	}
+
+	router := server.NewRouter(server.Deps{Config: cfg, Logger: log, Driver: drv})
 	return httpx.Serve(ctx, log, cfg.Addr, router)
+}
+
+func newDriver(cfg agentconfig.Config) (driver.Driver, error) {
+	switch cfg.VMDriver {
+	case "mock":
+		return mock.New(mock.Options{
+			DataDir: cfg.DataDir,
+			VNCAddr: cfg.MockVNCAddr,
+			Fail:    cfg.MockFail,
+			Delays:  mock.RealisticDelays,
+			Images:  mock.DefaultImages,
+		})
+	default:
+		return nil, fmt.Errorf("ZYN_VM_DRIVER=%s is not available yet: the libvirt driver arrives in milestone 5", cfg.VMDriver)
+	}
 }
