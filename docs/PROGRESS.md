@@ -386,7 +386,7 @@ Goal: something that can be run for real users.
 - [x] **M7.3** Host draining: no new VMs on a draining host, existing ones still start.
 - [ ] **M7.4** ZFS storage driver, passing the conformance suite.
 - [ ] **M7.5** The Debian image.
-- [ ] **M7.6** Production packaging: Dockerfiles for the API and the web app, a production Compose file, `infra/caddy/control-plane.Caddyfile`, `docs/DEPLOY_CONTROL_PLANE.md`.
+- [x] **M7.6** *(done as D.1)* Production packaging: Dockerfiles for the API and the web app, a production Compose file, `infra/caddy/control-plane.Caddyfile`, `docs/DEPLOY_CONTROL_PLANE.md`.
 - [ ] **M7.7** Backups, in `docs/OPERATIONS.md` with scripts: a nightly `pg_dump`, and VM disk backups of suspended and stopped VMs to S3-compatible storage with a tested restore procedure. The storage bucket comes from the user, so keep it configurable.
 - [ ] **M7.8** Metrics endpoints in Prometheus format on the API and the agent: job counts and durations, VMs by state, host capacity, open streams.
 - [x] **M7.9** Review the code against every item in section 16. Fix what you find and write the result to `docs/SECURITY_REVIEW.md`.
