@@ -108,11 +108,44 @@ export function Notice({
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+export function Card({ children, className = "", ...props }: ComponentProps<"div">) {
   return (
-    <div className={`rounded-card border border-border bg-surface p-6 ${className}`}>
+    <div {...props} className={`rounded-card border border-border bg-surface p-6 ${className}`}>
       {children}
     </div>
+  );
+}
+
+/** One choice in a group of options (operating system, size…). */
+export function Choice({
+  selected,
+  disabled = false,
+  title,
+  hint,
+  onSelect,
+}: {
+  selected: boolean;
+  disabled?: boolean;
+  title: string;
+  hint?: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      className={`flex flex-col items-start gap-0.5 rounded-control border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        selected
+          ? "border-accent bg-accent/10 text-text"
+          : "border-border bg-bg text-text hover:border-text-muted"
+      }`}
+    >
+      <span className="font-medium">{title}</span>
+      {hint && <span className="text-xs text-text-muted">{hint}</span>}
+    </button>
   );
 }
 

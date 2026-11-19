@@ -6,11 +6,12 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 
 - **Done:** Milestone 0 (foundations), Milestone 1 (accounts), Milestone 2 (host agent with
   the mock driver).
-- **Also done:** Milestone 3 (VM lifecycle in the control plane), and M4.10's backend half
-  (logout suspends running PCs).
-- **Next:** Milestone 4 (desktop in the browser), starting at M4.1 (`internal/shared/token`).
-  Then the stream proxy in the agent, the dashboard with VM cards, the creation wizard and the
-  noVNC viewer.
+- **Also done:** Milestone 3 (VM lifecycle in the control plane) and Milestone 4 (desktop in
+  the browser). The whole product flow works in mock mode.
+- **Next:** Milestone 5 (real virtual machines on KVM). Before starting it, the machine needs
+  one logout/login so the `libvirt` group membership is active (`virsh list --all` must work
+  without sudo). Order: M5.2 netalloc, M5.3 qcow2 storage, M5.4 cloud-init, M5.5 domain XML,
+  M5.6/M5.7 libvirt driver, M5.1 host setup scripts, M5.8 Ubuntu image.
 
 ## Environment check (M0.1, 2026-11-19)
 
@@ -110,6 +111,30 @@ The seeded admin is `admin@zynthera.local` with the password from `ZYN_SEED_ADMI
 - Not run yet: the hourly session cleanup task and the stuck-VM check have no test of
   their own (the stuck-VM check shares `settleFromHost` with the tested failure paths).
 
+## Verified at the end of milestone 4
+
+- Token package: expiry, tampering in ten variants, wrong purpose, replay, forgetting of
+  expired ids.
+- Stream proxy against a fake VNC server (with the race detector): bytes both ways, every
+  token and origin failure, single use, second viewer takes over with code 4409, stream
+  closes with 4404 when the PC stops or its display goes away.
+- API: stream token only for the owner and only while running; stream events authenticated
+  per host; a PC with a viewer is never suspended as idle; suspending closes the stream.
+- One Playwright test walks the whole journey in a real browser against `make dev` with the
+  mock desktop: sign up, verify by email, wizard (with validation), progress screen, a real
+  XFCE desktop on the canvas (checked by counting colours), mouse and keyboard input, the
+  dashboard card, the logout warning, the PC suspended after logout, resume, a second tab
+  taking over and "Use here", rename, history and delete. It takes about 25 seconds.
+- Two bugs found by that test and fixed: live updates did not start after logging in without
+  a page reload, and the viewer toolbar could not be opened without a mouse.
+- Looked at by hand: dashboard and settings on desktop and phone widths; no browser console
+  errors.
+- Not exercised by any test yet: fullscreen with keyboard lock, the clipboard panel,
+  Ctrl+Alt+Del, the "Still there?" idle prompt (its timing logic runs, but no test waits an
+  hour), and the automatic reconnect after a network drop.
+- `resizeSession` (the PC changes its resolution to fit the window) works with the mock
+  desktop's VNC server. Whether QEMU's display supports it is to be checked in milestone 5.
+
 ## Deployment milestone (added to the spec, see docs/DECISIONS.md D-001)
 
 Goal: a fresh Ubuntu server becomes a working Zynthera with one command.
@@ -201,17 +226,17 @@ Goal: the full lifecycle works through the API, with correct state handling unde
 
 Goal: the complete user journey works in mock mode.
 
-- [ ] **M4.1** `internal/shared/token`: sign and verify, with tests for expiry, tampering, wrong purpose and replay.
-- [ ] **M4.2** `POST /api/vms/:id/stream-token`.
-- [ ] **M4.3** Agent stream proxy as in section 11.7, tested with a fake VNC TCP server.
-- [ ] **M4.4** Stream events to the API, `viewer_connected` and `last_active_at`, and the idle sweep using them.
-- [ ] **M4.5** Web data layer for VMs: queries, mutations, and the event stream feeding the query cache.
-- [ ] **M4.6** Web: dashboard with VM cards and actions.
-- [ ] **M4.7** Web: creation wizard.
-- [ ] **M4.8** Web: desktop viewer with noVNC, the state table from section 15.4, toolbar (file buttons arrive in milestone 6), reconnect, fullscreen with keyboard lock, and the input idle prompt.
-- [ ] **M4.9** Web: settings page with rename, keep-alive, history and delete.
-- [ ] **M4.10** Logout suspends the user's VMs, and the logout confirmation says so.
-- [ ] **M4.11** Playwright end-to-end test in mock mode: sign up, verify (read the link from Mailpit's API), create a PC, see the desktop canvas receive frames, log out, confirm the VM is suspended, log in, resume, connected again.
+- [x] **M4.1** `internal/shared/token`: sign and verify, with tests for expiry, tampering, wrong purpose and replay.
+- [x] **M4.2** `POST /api/vms/:id/stream-token`.
+- [x] **M4.3** Agent stream proxy as in section 11.7, tested with a fake VNC TCP server.
+- [x] **M4.4** Stream events to the API, `viewer_connected` and `last_active_at`, and the idle sweep using them.
+- [x] **M4.5** Web data layer for VMs: queries, mutations, and the event stream feeding the query cache.
+- [x] **M4.6** Web: dashboard with VM cards and actions.
+- [x] **M4.7** Web: creation wizard.
+- [x] **M4.8** Web: desktop viewer with noVNC, the state table from section 15.4, toolbar (file buttons arrive in milestone 6), reconnect, fullscreen with keyboard lock, and the input idle prompt.
+- [x] **M4.9** Web: settings page with rename, keep-alive, history and delete.
+- [x] **M4.10** Logout suspends the user's VMs, and the logout confirmation says so.
+- [x] **M4.11** Playwright end-to-end test in mock mode: sign up, verify (read the link from Mailpit's API), create a PC, see the desktop canvas receive frames, log out, confirm the VM is suspended, log in, resume, connected again.
 
 **Done when:** in mock mode, a new user can go from sign-up to moving the mouse on a desktop in the browser, log out, log in again, see the PC as suspended, and resume it.
 

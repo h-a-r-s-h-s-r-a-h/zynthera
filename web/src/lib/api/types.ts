@@ -23,3 +23,108 @@ export interface ApiErrorBody {
     };
   };
 }
+
+export type VMState =
+  | "provisioning"
+  | "stopped"
+  | "starting"
+  | "running"
+  | "suspending"
+  | "suspended"
+  | "stopping"
+  | "rebooting"
+  | "maintenance"
+  | "deleting"
+  | "deleted"
+  | "error";
+
+/** internal/api/vms/statemachine.go: Action */
+export type VMAction =
+  | "connect"
+  | "start"
+  | "suspend"
+  | "shutdown"
+  | "force_stop"
+  | "reboot"
+  | "discard_saved_state"
+  | "resize"
+  | "snapshot"
+  | "restore_snapshot"
+  | "delete_snapshot"
+  | "delete";
+
+/** internal/api/vmsvc/vmsvc.go: VMJSON */
+export interface VM {
+  id: string;
+  name: string;
+  image: { slug: string; display_name: string };
+  ram_mb: number;
+  vcpus: number;
+  disk_gb: number;
+  disk_used_bytes: number;
+  linux_username: string;
+  state: VMState;
+  state_detail: string | null;
+  has_saved_state: boolean;
+  viewer_connected: boolean;
+  keep_alive_until: string | null;
+  last_active_at: string | null;
+  created_at: string;
+  allowed_actions: VMAction[];
+}
+
+/** internal/api/httpapi/vm_handlers.go: imageJSON */
+export interface OSImage {
+  slug: string;
+  display_name: string;
+  description: string;
+  min_ram_mb: number;
+  min_disk_gb: number;
+}
+
+/** internal/api/httpapi/vm_handlers.go: handleOptions */
+export interface Options {
+  allowed_ram_mb: number[];
+  allowed_vcpus: number[];
+  allowed_disk_gb: number[];
+  max_keep_alive_hours: number;
+  max_snapshots_per_vm: number;
+  idle_input_minutes: number;
+  limits: { max_vms: number; max_ram_mb: number; max_vcpus: number; max_disk_gb: number };
+  usage: { vms: number; ram_mb: number; vcpus: number; disk_gb: number };
+}
+
+/** internal/api/httpapi/vm_handlers.go: eventJSON */
+export interface VMEvent {
+  type: string;
+  actor: "user" | "admin" | "system";
+  message: string;
+  created_at: string;
+}
+
+/** internal/api/httpapi/vm_handlers.go: snapshotJSON */
+export interface Snapshot {
+  id: string;
+  name: string;
+  status: "creating" | "ready" | "error";
+  size_bytes: number;
+  created_at: string;
+}
+
+/** internal/api/httpapi/hosts.go: handleStreamToken */
+export interface StreamToken {
+  url: string;
+  token: string;
+  expires_at: string;
+}
+
+/** POST /api/vms */
+export interface CreateVMInput {
+  name: string;
+  image: string;
+  ram_mb: number;
+  vcpus: number;
+  disk_gb: number;
+  linux_username: string;
+  linux_password: string;
+}

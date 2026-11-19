@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
 import { Providers } from "@/components/providers";
 import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
@@ -24,7 +25,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <Providers>
-          <SiteHeader />
+          {/* The header reads the current path, which is only known at
+              request time on pages like /vms/[id]. Suspense lets the rest of
+              the page be prerendered and the header stream in. */}
+          <Suspense fallback={<div className="h-14 border-b border-border" />}>
+            <SiteHeader />
+          </Suspense>
           <main className="flex flex-1 flex-col">{children}</main>
         </Providers>
       </body>

@@ -1,10 +1,24 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "./client";
 import type { User } from "./types";
 
 export const meKey = ["auth", "me"] as const;
+
+/**
+ * Switches the cached identity and drops everything that belonged to the
+ * previous one.
+ *
+ * The identity is updated in place instead of clearing the whole cache.
+ * Clearing throws the identity query away, and components that were already
+ * watching it (the header, the live-update connection) would keep watching
+ * the discarded copy and never learn that someone logged in.
+ */
+function switchUser(queryClient: QueryClient, user: User | null): void {
+  queryClient.setQueryData(meKey, user);
+  queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== meKey[0] });
+}
 
 /**
  * The logged-in user, or null when nobody is logged in.
@@ -43,11 +57,8 @@ export function useLogin() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: Credentials) => api<{ user: User }>("/auth/login", { method: "POST", body }),
-    onSuccess: (res) => {
-      // A different person may have logged in: drop everything cached.
-      queryClient.clear();
-      queryClient.setQueryData(meKey, res.user);
-    },
+    // A different person may have logged in: nothing cached may survive.
+    onSuccess: (res) => switchUser(queryClient, res.user),
   });
 }
 
@@ -55,10 +66,7 @@ export function useLogout() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => api<{ status: string }>("/auth/logout", { method: "POST", body: {} }),
-    onSuccess: () => {
-      queryClient.clear();
-      queryClient.setQueryData(meKey, null);
-    },
+    onSuccess: () => switchUser(queryClient, null),
   });
 }
 
@@ -90,9 +98,6 @@ export function useResetPassword() {
   return useMutation({
     mutationFn: (body: { token: string; password: string }) =>
       api<{ status: string }>("/auth/reset-password", { method: "POST", body }),
-    onSuccess: () => {
-      queryClient.clear();
-      queryClient.setQueryData(meKey, null);
-    },
+    onSuccess: () => switchUser(queryClient, null),
   });
 }

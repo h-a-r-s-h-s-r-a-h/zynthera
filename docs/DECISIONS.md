@@ -159,3 +159,45 @@ acts only when both agree and both are newer than the VM's last state change.
 
 Go's standard library has no crypt(3). The output is checked against `openssl passwd -6`
 in a test.
+
+## D-028 The stream proxy always accepts the WebSocket handshake
+
+Wrong origin, bad token and "PC not running" are reported as WebSocket close codes (4403,
+4401, 4404) after accepting the handshake, as spec 11.7 lists them. A browser cannot read
+the HTTP status of a refused upgrade, so refusing it would leave the viewer unable to tell
+the cases apart. Nothing is forwarded before all checks pass.
+
+## D-029 The agent closes streams itself when a PC stops
+
+After a successful suspend, shutdown, force stop or delete the agent closes the PC's stream
+with 4404. A real VM's VNC socket closes anyway when QEMU exits; doing it explicitly makes
+the mock driver behave the same.
+
+## D-030 Stream events carry the host id
+
+`POST /internal/agent/stream-event` takes `{ host_id, vm_id, event }` (the spec lists only
+`vm_id` and `event`). The host id is needed to check the caller's token, and the update is
+restricted to VMs that live on that host.
+
+## D-031 The viewer opens the WebSocket itself
+
+noVNC is given an open WebSocket instead of a URL, so the viewer can read the close code and
+tell "opened in another tab" from "PC stopped" from "connection dropped".
+
+## D-032 The viewer hides the site header
+
+The desktop page uses the whole window. Its own toolbar (opened by hovering or by clicking
+the small tab at the top) leads back to the dashboard.
+
+## D-033 Suspending from the viewer returns to the dashboard
+
+Opening the desktop page starts or resumes the PC automatically, once. After a suspend or
+shutdown from the toolbar the viewer navigates away, so the PC is not started again by the
+page it was just stopped from.
+
+## D-034 Next.js 16 specifics
+
+The header is wrapped in `<Suspense>` because it reads the current path, which blocks
+prerendering of dynamic routes otherwise. Components that depend on who is logged in render
+a neutral state until hydration is finished (`useHydrated`), which avoids hydration errors
+when the login check finishes before a late part of the page hydrates.
