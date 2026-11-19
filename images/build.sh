@@ -27,15 +27,23 @@ if [[ -e "$target" ]]; then
   echo "refusing to overwrite $target: build a new version instead" >&2
   exit 1
 fi
-for tool in packer qemu-img xorriso go; do
+for tool in packer qemu-img xorriso; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 
 work="$(mktemp -d "${TMPDIR:-/var/tmp}/zyn-image-build.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
-echo "==> building the file bridge"
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$work/zynthera-file-bridge" ./cmd/file-bridge
+# The file bridge is baked into the image. A server without Go passes an
+# already built binary in ZYN_BRIDGE_BINARY (scripts/install.sh does).
+if [[ -n "${ZYN_BRIDGE_BINARY:-}" ]]; then
+  [[ -x "$ZYN_BRIDGE_BINARY" ]] || { echo "ZYN_BRIDGE_BINARY is not an executable file: $ZYN_BRIDGE_BINARY" >&2; exit 1; }
+  cp "$ZYN_BRIDGE_BINARY" "$work/zynthera-file-bridge"
+else
+  command -v go >/dev/null || { echo "missing tool: go (or set ZYN_BRIDGE_BINARY)" >&2; exit 1; }
+  echo "==> building the file bridge"
+  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$work/zynthera-file-bridge" ./cmd/file-bridge
+fi
 
 echo "==> building $slug $version (this takes 10 to 20 minutes)"
 packer init "$template" >/dev/null

@@ -52,6 +52,11 @@ type Config struct {
 	AgentToken        string
 	AgentStreamSecret string
 	AgentAddr         string
+	// SeedHostPublicURL, when set, makes `seed` register this server as a VM
+	// host in production too (used by scripts/install.sh for a single
+	// server). It is the address browsers use to reach the agent.
+	SeedHostPublicURL string
+	SeedHostName      string
 }
 
 // IsProduction reports whether the API runs for real users.
@@ -102,6 +107,8 @@ func Load() (Config, error) {
 		AgentToken:        l.String("ZYN_AGENT_TOKEN", ""),
 		AgentStreamSecret: l.String("ZYN_AGENT_STREAM_SECRET", ""),
 		AgentAddr:         l.String("ZYN_AGENT_ADDR", "127.0.0.1:9090"),
+		SeedHostPublicURL: strings.TrimRight(l.String("ZYN_SEED_HOST_PUBLIC_URL", ""), "/"),
+		SeedHostName:      l.String("ZYN_SEED_HOST_NAME", "local"),
 	}
 
 	if c.WebOrigin != "" {

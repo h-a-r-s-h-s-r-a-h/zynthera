@@ -236,3 +236,40 @@ Ubuntu's own `firefox` package is a snap, which starts slowly in a VM.
 Packer logs in over SSH as a temporary user. That user cannot delete itself while logged in,
 so the sealing script installs a unit that removes it at the very end of the shutdown, along
 with the unit itself. SSH is disabled and masked in the finished image.
+
+## D-041 One domain for a single server
+
+On a single server the agent's browser endpoints (`/stream`, `/files/*`) are served under
+the same domain as the web app, by Caddy. One DNS record, one certificate, no cross-origin
+requests. Separate VM hosts keep their own names (`infra/caddy/host.Caddyfile`).
+
+## D-042 The API container uses host networking
+
+The agent listens on loopback only. Host networking lets the API reach it (and Postgres and
+Redis, published on loopback) without opening any port to a Docker network.
+
+## D-043 The firewall has its own systemd unit
+
+`/etc/nftables.conf` begins with `flush ruleset` on Debian and Ubuntu, which would delete the
+rules libvirt installs. Zynthera's rules live in one table, loaded by
+`zynthera-firewall.service` from `/etc/zynthera/firewall.nft`.
+
+## D-044 `seed` can register a production host
+
+With `ZYN_SEED_HOST_PUBLIC_URL` set, `zynthera-api seed` registers this server as a VM host
+using the id and secrets from the environment. The installer uses it so nobody has to copy
+secrets from the admin area into `agent.env`.
+
+## D-045 The web image is Debian-based
+
+`npm ci` refuses a lock file that does not match the platform, and the lock file is resolved
+for glibc Linux. The API image is Alpine (a static Go binary has no such concern).
+
+## D-046 Shutdown repeats its request
+
+`virsh shutdown` is sent again every five seconds until the domain is off. A guest that is
+still booting has no agent yet and ignores the ACPI button, so one early request is lost.
+
+## D-047 Clock sync falls back to `date` in the guest
+
+See docs/DEPLOY_HOST.md, "Clock after resume".

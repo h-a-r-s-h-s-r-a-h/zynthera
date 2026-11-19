@@ -232,14 +232,17 @@ func seed(ctx context.Context, log *slog.Logger, cfg appconfig.Config) error {
 	}
 	log.Info("seed: OS images ready", "count", len(seedOSImages))
 
-	if cfg.IsProduction() {
+	// In development the developer's machine is always registered as a
+	// host. In production only when the installer asks for it.
+	if cfg.IsProduction() && cfg.SeedHostPublicURL == "" {
 		return nil
 	}
 	return seedDevHost(ctx, log, cfg, q)
 }
 
-// seedDevHost registers the developer's own machine as the host "local", with
-// the id and secrets from .env, so the API and the local agent already agree.
+// seedDevHost registers this machine as a VM host, with the id and secrets
+// from the environment, so the API and the local agent already agree. It is
+// used in development (.env) and by the single-server installer.
 func seedDevHost(ctx context.Context, log *slog.Logger, cfg appconfig.Config, q *sqlcgen.Queries) error {
 	if cfg.AgentHostID == "" || cfg.AgentToken == "" || cfg.AgentStreamSecret == "" {
 		log.Info("seed: no development host (ZYN_AGENT_HOST_ID, ZYN_AGENT_TOKEN or ZYN_AGENT_STREAM_SECRET is empty)")
@@ -261,19 +264,25 @@ func seedDevHost(ctx context.Context, log *slog.Logger, cfg appconfig.Config, q 
 	if err != nil {
 		return err
 	}
+	// The API reaches the agent on loopback. Browsers use the same address
+	// in development, and the public one (behind Caddy) in production.
 	agentURL := "http://" + cfg.AgentAddr
+	publicURL := agentURL
+	if cfg.SeedHostPublicURL != "" {
+		publicURL = cfg.SeedHostPublicURL
+	}
 	host, err := q.UpsertHostWithID(ctx, sqlcgen.UpsertHostWithIDParams{
 		ID:              id,
-		Name:            "local",
+		Name:            cfg.SeedHostName,
 		AgentUrl:        agentURL,
-		PublicUrl:       agentURL,
+		PublicUrl:       publicURL,
 		AgentTokenEnc:   tokenEnc,
 		StreamSecretEnc: secretEnc,
 	})
 	if err != nil {
 		return fmt.Errorf("seed development host: %w", err)
 	}
-	log.Info("seed: development host ready", "name", host.Name, "agent_url", host.AgentUrl)
+	log.Info("seed: host ready", "name", host.Name, "agent_url", host.AgentUrl, "public_url", host.PublicUrl)
 	return nil
 }
 

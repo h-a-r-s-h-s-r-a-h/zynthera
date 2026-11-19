@@ -365,8 +365,25 @@ func (d *Driver) Suspend(ctx context.Context, id string) error {
 	return nil
 }
 
-// Shutdown implements driver.Driver: ask the guest agent, then ACPI, then
-// wait for the domain to switch off.
+// requestShutdown asks the guest to power off: through the guest agent
+// first, and with the ACPI power button if the agent does not answer.
+func (d *Driver) requestShutdown(ctx context.Context, name string) error {
+	if _, err := d.virsh(ctx, "shutdown", name, "--mode", "agent"); err == nil {
+		return nil
+	}
+	_, err := d.virsh(ctx, "shutdown", name, "--mode", "acpi")
+	if err != nil && !run.StderrContains(err, "not running") {
+		return fmt.Errorf("libvirt: shutdown: %w", err)
+	}
+	return nil
+}
+
+// Shutdown implements driver.Driver: ask the guest to power off and wait for
+// the domain to switch off.
+//
+// The request is repeated every few seconds. A guest that is still booting
+// has no agent running yet and ignores the power button, so a single
+// request sent too early would simply be lost.
 func (d *Driver) Shutdown(ctx context.Context, id string, timeout time.Duration) error {
 	state, err := d.knownState(ctx, id)
 	if err != nil {
@@ -376,13 +393,16 @@ func (d *Driver) Shutdown(ctx context.Context, id string, timeout time.Duration)
 		return nil
 	}
 	name := domainxml.Name(id)
-	if _, err := d.virsh(ctx, "shutdown", name, "--mode", "agent"); err != nil {
-		if _, err := d.virsh(ctx, "shutdown", name, "--mode", "acpi"); err != nil && !run.StderrContains(err, "not running") {
-			return fmt.Errorf("libvirt: shutdown: %w", err)
-		}
-	}
 	deadline := time.Now().Add(timeout)
+	const resendEvery = 5 * time.Second
+	var lastRequest time.Time
 	for {
+		if time.Since(lastRequest) >= resendEvery {
+			if err := d.requestShutdown(ctx, name); err != nil {
+				return err
+			}
+			lastRequest = time.Now()
+		}
 		state, err := d.domstate(ctx, id)
 		if err != nil {
 			return err

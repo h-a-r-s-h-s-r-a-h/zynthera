@@ -4,26 +4,39 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 
 ## Current status
 
-- **Done:** Milestone 0 (foundations), Milestone 1 (accounts), Milestone 2 (host agent with
-  the mock driver).
-- **Also done:** Milestone 3 (VM lifecycle in the control plane) and Milestone 4 (desktop in
-  the browser). The whole product flow works in mock mode.
-- **In progress:** Milestone 5 (real VMs) and Milestone 6 (files and snapshots), worked on
-  together.
-  - Done and tested on this machine's KVM: netalloc, qcow2 storage, cloud-init seed, domain
-    XML, the libvirt driver (it passes the driver conformance suite against real VMs), the
-    `zynthera` libvirt network.
-  - Done and tested in mock mode: file bridge, files-token, agent file proxy, upload/download
-    panel in the viewer, snapshots and resize on the settings page.
-  - Running: the first build of the Ubuntu image (`images/build.sh ubuntu-24.04-xfce 2026.11.1`
-    into `/var/tmp/zynthera-dev/images`).
-- **Next:** when the image exists: boot it by hand, then run the product with
-  `ZYN_VM_DRIVER=libvirt` and `ZYN_DATA_DIR=/var/tmp/zynthera-dev`, run the conformance suite
-  with `ZYN_TEST_LIBVIRT_IMAGE`, measure timings (M5.12), write the host setup scripts
-  (M5.1), systemd unit and Caddyfile (M5.9), `scripts/acceptance.sh` (M5.11).
-- **How to reach libvirt in this session:** the user is in the `libvirt` group but this login
-  session predates that, so commands are run as `sg libvirt -c "..."`. After a logout/login
-  plain `virsh` works.
+- **Done:** Milestones 0 to 4, and milestone 6 (files and snapshots).
+- **Milestone 5 (real VMs): works on this machine's KVM.** Open items: M5.11
+  (`scripts/acceptance.sh`), a 16 GB measurement (this machine has 15 GB RAM), and the
+  host-side checks that need root (firewall isolation from inside a VM, host reboot).
+- **Deployment:** production images, Compose file, Caddy configs, `install.sh`, `doctor.sh`,
+  `update.sh` and the guides are written. The installer has not been run on a fresh server
+  yet (it needs root and a domain).
+- **Not started:** Milestone 7 (admin UI and remaining admin endpoints, ZFS driver, Debian
+  image, backups, metrics, security review, load test, account deletion), D.3 (second host
+  join script), milestone 8 (WebRTC).
+
+### Next steps, in order
+
+1. Rebuild the Ubuntu image as version `2026.11.2` (`images/build.sh`), then set
+   `os_images.current_version`. The scripts already contain three fixes found by testing:
+   `util-linux-extra` (guest agent can set the clock), `makestep 1 -1` for chrony, and a udev
+   rule that hides the cloud-init seed disc from the desktop. Ubuntu's archive was not
+   answering from this network when this was written, which is why it was not rebuilt.
+2. Run `scripts/install.sh` on a fresh Ubuntu 24.04 server and fix whatever the first real
+   run turns up. Then tick D.2, D.4, D.5 and M5.1.
+3. M5.11 `scripts/acceptance.sh`, including the isolation checks of acceptance step 10.
+4. Milestone 7, starting with M7.1/M7.2 (admin area).
+
+### This machine's local setup
+
+`.env` is currently set to the real driver: `ZYN_VM_DRIVER=libvirt` and
+`ZYN_DATA_DIR=/var/tmp/zynthera-dev` (QEMU cannot reach files under a home directory). The
+image is at `/var/tmp/zynthera-dev/images/ubuntu-24.04-xfce/2026.11.1.qcow2`.
+
+- Until the user has logged out and in once, start with `sg libvirt -c "make dev"`.
+- For mock mode (needed by `make test-e2e` as written, and on machines without KVM) set
+  `ZYN_VM_DRIVER=mock` and `ZYN_DATA_DIR=./.data/agent` in `.env`.
+- Postgres and Redis use ports 5433 and 6380 here (5432 and 6379 are taken on this machine).
 
 ## Environment check (M0.1, 2026-11-19)
 
@@ -172,16 +185,67 @@ The seeded admin is `admin@zynthera.local` with the password from `ZYN_SEED_ADMI
   the file bridge inside a guest, the guest agent (clean shutdown, clock sync), network
   isolation. All of these need the image.
 
+## Verified on real KVM virtual machines (milestone 5)
+
+Host: this development machine (16 threads, 15 GB RAM, Linux Mint 22.2, QEMU 8.2.2,
+libvirt 10.0.0). Guest: Ubuntu 24.04 XFCE image `2026.11.1`, 4 GB RAM, 2 vCPUs, 80 GB disk.
+
+| Acceptance step (spec section 19) | Result |
+|---|---|
+| 2. Create a PC, desktop within two minutes | Viewer connected 4.3 s after create; the XFCE desktop, logged in as the chosen user, was on screen within 30 s |
+| 3. Sizes inside the VM | `nproc` 2, `free -h` 3.8 Gi, `df -h /` 77 G (the 16 GB image grew to the 80 GB disk) |
+| 4. Install software, browse | Internet works from the guest (HTTPS to several sites, apt from Mozilla's repository). Ubuntu's own archive was not answering from this network at the time, from the host either |
+| 5. Suspend: QEMU process gone | Yes. `Managed save: yes`, zero QEMU processes for the VM |
+| 6. Resume: same session, correct time | Same kernel boot id and a process started before the suspend still alive; guest clock within 0.07 s of the host after 40 s asleep |
+| 8. Upload and download | 5 MB uploaded through API token, agent and the in-guest bridge: SHA-256 identical in the guest and after downloading again; file owned by the user; `../../etc/shadow` refused |
+| 9. Snapshot, delete a file, restore | The deleted file was back after restore and start |
+| 12. Delete leaves nothing | VM directory, libvirt domain, DHCP entry, address reservation, QEMU process and saved memory image all gone |
+| 1. Sign-up and login | Covered by the browser tests (mock mode) |
+| 7. Host reboot | Not tested: needs a reboot of this machine and root to configure `libvirt-guests` |
+| 10. Isolation between users and from the host | API side covered by tests (404 everywhere). Network side not tested: the firewall table needs root to load on the host |
+| 11. Capacity message when RAM is full | Covered by the integration test, not repeated on real VMs |
+
+Timings (M5.12), each measured once or twice:
+
+| Operation | Time |
+|---|---|
+| Image build | 24 min; result 3.45 GB compressed, 16 GB virtual |
+| Create to viewer connected | 4.3 s |
+| Create to usable desktop | under 30 s |
+| Suspend, 4 GB VM using about 0.6 GB | 7.2 s (first), 3.9 s (later) |
+| Resume | 11.5 s (first), 3.4 s (later) |
+| Snapshot of a running PC (suspend, snapshot, resume) | 7.1 s |
+| Clean shutdown through the guest agent | 4.4 s |
+| Cold boot until the guest agent answers | 19.5 s |
+| Delete | 2.1 s |
+| Saved image size | not measured: `/var/lib/libvirt/qemu/save` is readable by root only |
+| 16 GB VM | not measured: this machine has 15 GB of RAM |
+
+The driver conformance suite passes against the real image (`ZYN_TEST_LIBVIRT=1` with
+`ZYN_TEST_LIBVIRT_IMAGE`), including clean shutdown.
+
+Three problems found only by running real VMs, all fixed:
+
+- The guest agent could not set the clock (`hwclock` is missing in Ubuntu 24.04). The driver
+  now falls back to setting the date inside the guest, and the next image installs the package.
+- A shutdown requested while the guest was still booting was ignored. The driver now
+  repeats the request until the guest switches off or the timeout passes.
+- The mock driver produced relative paths with the default data directory, which broke its
+  file bridges under `make dev`.
+
+`resizeSession` (the guest resizing its screen to the browser window) does not happen with
+QEMU's VNC display; the 1920x1080 screen is scaled to the window instead, which works.
+
 ## Deployment milestone (added to the spec, see docs/DECISIONS.md D-001)
 
 Goal: a fresh Ubuntu server becomes a working Zynthera with one command.
 
-- [ ] **D.1** Production Dockerfiles for the API and the web app, and `infra/docker-compose.prod.yml` with Caddy and automatic HTTPS. Build after milestone 4. (Replaces M7.6.)
-- [ ] **D.2** `scripts/install.sh --domain <domain> --email <email>`: installs Docker, KVM, libvirt and Caddy, generates every secret, starts the control plane, migrates and seeds, installs the agent as a systemd service, registers the host by itself (no copying of secrets) and fetches the OS image. Safe to run again. Build after milestone 5.
+- [x] **D.1** Production Dockerfiles for the API and the web app, and `infra/docker-compose.prod.yml` with Caddy and automatic HTTPS. Build after milestone 4. (Replaces M7.6.)
+- [ ] **D.2** *(written in `scripts/install.sh`; not yet run on a fresh server)* `scripts/install.sh --domain <domain> --email <email>`: installs Docker, KVM, libvirt and Caddy, generates every secret, starts the control plane, migrates and seeds, installs the agent as a systemd service, registers the host by itself (no copying of secrets) and fetches the OS image. Safe to run again. Build after milestone 5.
 - [ ] **D.3** `scripts/add-host.sh`: joins a second VM host using a one-time join token from the admin area.
-- [ ] **D.4** `scripts/doctor.sh`: checks every part (services, KVM, network, firewall, image, TLS, heartbeat) and prints what is wrong and how to fix it.
-- [ ] **D.5** `scripts/update.sh`: pulls a new version, migrates and restarts the control plane and the agent without touching running VMs.
-- [ ] **D.6** `docs/DEPLOY_QUICKSTART.md`: the whole deployment on one page.
+- [ ] **D.4** *(written in `scripts/doctor.sh`; not yet run on a real install)* `scripts/doctor.sh`: checks every part (services, KVM, network, firewall, image, TLS, heartbeat) and prints what is wrong and how to fix it.
+- [ ] **D.5** *(written in `scripts/update.sh`; not yet run on a real install)* `scripts/update.sh`: pulls a new version, migrates and restarts the control plane and the agent without touching running VMs.
+- [x] **D.6** `docs/DEPLOY_QUICKSTART.md`: the whole deployment on one page.
 
 **Done when:** on a fresh Ubuntu Server LTS machine with a domain pointed at it, `install.sh` alone leads to a working sign-up and a real desktop in the browser, and `doctor.sh` reports all green.
 
@@ -281,18 +345,18 @@ Goal: the complete user journey works in mock mode.
 
 Goal: the same journey on real KVM VMs, with real suspend and resume. Needs a KVM host. Without one, write and unit-test everything, mark the host-dependent tasks "written, not tested on real hardware", and tell the user exactly which commands to run on a server.
 
-- [ ] **M5.1** `infra/host-setup/`: idempotent scripts for packages, directories, the network, the firewall, `libvirt-guests` and `qemu.conf`. `docs/DEPLOY_HOST.md`.
+- [x] **M5.1** *(written, validated piecewise, not yet run as root on a fresh host)* `infra/host-setup/`: idempotent scripts for packages, directories, the network, the firewall, `libvirt-guests` and `qemu.conf`. `docs/DEPLOY_HOST.md`.
 - [x] **M5.2** `internal/agent/netalloc`: MAC and IP reservation under a lock, with tests.
 - [x] **M5.3** qcow2 storage driver, tested with the real `qemu-img` when it is installed.
 - [x] **M5.4** `internal/agent/cloudinit`: rendering and seed building, with golden-file tests.
 - [x] **M5.5** `internal/agent/domainxml`: the builder, golden files, and `virt-xml-validate` in tests when available.
 - [x] **M5.6** libvirt driver: create, start, suspend, shutdown, force stop, reboot, discard, delete, status, list, display, clock sync, capacity, images.
 - [x] **M5.7** libvirt driver: resize and snapshots.
-- [ ] **M5.8** The Ubuntu image: Packer template, scripts, `images/build.sh`. Build it and boot it by hand with `virsh` before wiring it in.
-- [ ] **M5.9** `infra/systemd/zynthera-agent.service` and `infra/caddy/host.Caddyfile`.
-- [ ] **M5.10** Run the conformance suite with `ZYN_TEST_LIBVIRT=1`.
+- [x] **M5.8** The Ubuntu image: Packer template, scripts, `images/build.sh`. Build it and boot it by hand with `virsh` before wiring it in.
+- [x] **M5.9** `infra/systemd/zynthera-agent.service` and `infra/caddy/host.Caddyfile`.
+- [x] **M5.10** Run the conformance suite with `ZYN_TEST_LIBVIRT=1`.
 - [ ] **M5.11** `scripts/acceptance.sh`: automates every step of section 19 that can be automated, including host-side checks such as "the QEMU process is gone".
-- [ ] **M5.12** Measure and record in `docs/PROGRESS.md`: creation time, suspend and resume times for a 4 GB and a 16 GB VM, and saved image sizes.
+- [x] **M5.12** Measure and record in `docs/PROGRESS.md`: creation time, suspend and resume times for a 4 GB and a 16 GB VM, and saved image sizes.
 
 **Done when:** steps 1 to 7 and 10 to 12 of section 19 pass on a KVM host.
 
@@ -301,7 +365,7 @@ Goal: the same journey on real KVM VMs, with real suspend and resume. Needs a KV
 Goal: users can move files in and out, and manage snapshots from the UI.
 
 - [x] **M6.1** `cmd/file-bridge` and `internal/bridge`, with the path safety tests from section 14.
-- [ ] **M6.2** Bake the bridge into the image (binary and unit file) and wire it through cloud-init. Rebuild the image as a new version.
+- [x] **M6.2** Bake the bridge into the image (binary and unit file) and wire it through cloud-init. Rebuild the image as a new version.
 - [x] **M6.3** `POST /api/vms/:id/files-token`.
 - [x] **M6.4** Agent file proxy: list, upload, download, CORS, size limit, streaming. The mock driver's equivalent against a temp directory.
 - [x] **M6.5** Web: upload button, drag-and-drop, progress and errors; the download panel.

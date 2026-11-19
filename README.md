@@ -3,6 +3,7 @@
 A personal Linux computer in a browser tab. Each user gets a real virtual machine that
 runs on our servers, is suspended when they leave and resumes exactly where they left it.
 
+- `docs/DEPLOY_QUICKSTART.md`: put it on a server with one command.
 - `PROJECT_SPEC.md`: the full specification.
 - `docs/PROGRESS.md`: what is built so far and what is next.
 - `docs/DECISIONS.md`: choices that differ from the specification.
