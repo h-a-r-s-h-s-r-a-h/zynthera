@@ -50,3 +50,40 @@ image requires.
 
 There is no file watcher for the Go binaries; restart `make dev` after changing Go code.
 The web app hot-reloads as usual. A watcher can be added later if it becomes annoying.
+
+## D-009 Sign-up does not log the user in
+
+Spec 10.2 requires sign-up to answer the same way whether or not the email already has an
+account. Logging the new user in would reveal the difference, so sign-up always answers
+"check your email" (HTTP 202) and the person logs in afterwards. Unverified users can still
+log in, as the spec says.
+
+## D-010 A password reset also confirms the email address
+
+Using a reset link proves the person controls the mailbox, which is exactly what
+verification checks. Without this, someone who lost the verification email and reset their
+password would still be asked to verify.
+
+## D-011 Rate limits are applied inside handlers, not as one middleware
+
+The limit keys depend on the request body (the email at login) or on the logged-in user, so
+each handler calls the limiter after parsing. If Redis is down the limiter fails closed
+(HTTP 500): otherwise an outage would open login to unlimited password guessing.
+
+## D-012 Client address comes from the last X-Forwarded-For entry
+
+The API is only reachable through our own proxy (Caddy, or the Next.js dev server). The
+proxy appends the real client address, so the last entry is trustworthy while earlier ones
+can be forged by the client. It is used only when the direct peer is a local or private
+address.
+
+## D-013 Login state is resolved in the browser
+
+Pages are static and the "who is logged in" check runs in the browser (`useMe`), with
+`RequireAuth` / `GuestOnly` wrappers doing the redirects. This keeps every page cacheable and
+the API the only place that reads the session cookie. The API enforces access; the redirects
+are a convenience.
+
+## D-014 Go integration tests run one package at a time
+
+All packages share the `zynthera_test` database, so `make test` uses `go test -p 1`.

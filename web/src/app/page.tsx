@@ -1,4 +1,5 @@
 import { ApiHealth } from "@/components/api-health";
+import { ButtonLink } from "@/components/ui";
 
 export default function LandingPage() {
   return (
@@ -10,6 +11,12 @@ export default function LandingPage() {
         Pick the size, install anything, and close the tab whenever you like. Your PC is saved
         exactly as you left it and resumes when you come back.
       </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <ButtonLink href="/signup">Create your PC</ButtonLink>
+        <ButtonLink href="/login" variant="secondary">
+          Log in
+        </ButtonLink>
+      </div>
       <ApiHealth />
     </section>
   );

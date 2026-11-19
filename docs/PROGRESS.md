@@ -4,8 +4,9 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 
 ## Current status
 
-- **Done:** Milestone 0 (foundations).
-- **Next:** Milestone 1 (accounts), starting at M1.1.
+- **Done:** Milestone 0 (foundations), Milestone 1 (accounts).
+- **Next:** Milestone 2 (host agent with the mock driver), starting at M2.1. The mock desktop
+  image (M2.4) is already built; it still needs the "VNC client can connect" check.
 - **Mode:** mock driver for milestones 0 to 4, then real KVM on this machine from milestone 5.
 
 ## Environment check (M0.1, 2026-11-19)
@@ -35,7 +36,9 @@ make up && make migrate && make seed && make dev
 ```
 
 Open http://localhost:3000. The landing page shows "API is healthy".
-`make test`, `make lint` and `make build` pass.
+Sign up, open the confirmation email at http://localhost:8025 (Mailpit), confirm, log in.
+The seeded admin is `admin@zynthera.local` with the password from `ZYN_SEED_ADMIN_PASSWORD`.
+`make test`, `make lint`, `make build` and `make test-e2e` pass.
 
 ## Verified at the end of milestone 0
 
@@ -46,6 +49,19 @@ Open http://localhost:3000. The landing page shows "API is healthy".
 - A POST with a foreign `Origin` is refused with 403 and the error envelope.
 - Not yet verified: the CI workflow (there is no Git remote to run it on), and `make up`
   with the mock desktop image (built in M2.4).
+
+## Verified at the end of milestone 1
+
+- 20 Go integration tests against the real test database and Redis: sign-up, verify, login,
+  logout, password reset, single-use and expired tokens, session rotation, disabled users,
+  identical answers for known and unknown emails, wrong-Origin rejection, rate limits.
+- 4 Playwright browser tests against the running stack: the full sign-up journey with the
+  email read from Mailpit, password reset by email, the generic wrong-password message, and
+  the seeded admin logging in.
+- Every page loaded logged-out and logged-in with no browser console errors.
+- Not yet done from spec section 16.14 (audit trail): logins are recorded in the structured
+  log and in the `sessions` table (IP, user agent), not yet in a dedicated audit table.
+  Planned with the security review in M7.9.
 
 ## Deployment milestone (added to the spec, see docs/DECISIONS.md D-001)
 
@@ -84,16 +100,16 @@ Goal: an empty but fully wired project that anyone can start with five commands.
 
 Goal: people can sign up, verify their email, log in and reset a password.
 
-- [ ] **M1.1** Migration for `users`, `sessions`, `email_tokens`, with sqlc queries.
-- [ ] **M1.2** Password hashing package (argon2id, PHC string format) with tests.
-- [ ] **M1.3** Sessions: issue, look up, rotate, revoke. Session middleware, cookie settings by environment, Origin check middleware.
-- [ ] **M1.4** Redis rate limiter middleware with the limits from section 10.2.
-- [ ] **M1.5** Mail package: SMTP sender, verification and reset emails in text and HTML, links built from `ZYN_WEB_ORIGIN`, and a fake sender for tests.
-- [ ] **M1.6** Handlers: signup, login, logout, me, verify-email, resend-verification, forgot-password, reset-password.
-- [ ] **M1.7** Seed the admin user.
-- [ ] **M1.8** Web: API client (a fetch wrapper that parses the error envelope), auth pages with zod validation, session-aware layout, redirects (logged out goes to `/login`, logged in is kept away from auth pages), and a "verify your email" banner.
-- [ ] **M1.9** Web: an empty dashboard and a header with the user menu and logout.
-- [ ] **M1.10** Integration tests: signup to verify to login to logout; the reset flow; rate limiting; identical responses for known and unknown emails; rejected requests with a wrong Origin.
+- [x] **M1.1** Migration for `users`, `sessions`, `email_tokens`, with sqlc queries.
+- [x] **M1.2** Password hashing package (argon2id, PHC string format) with tests.
+- [x] **M1.3** Sessions: issue, look up, rotate, revoke. Session middleware, cookie settings by environment, Origin check middleware.
+- [x] **M1.4** Redis rate limiter middleware with the limits from section 10.2.
+- [x] **M1.5** Mail package: SMTP sender, verification and reset emails in text and HTML, links built from `ZYN_WEB_ORIGIN`, and a fake sender for tests.
+- [x] **M1.6** Handlers: signup, login, logout, me, verify-email, resend-verification, forgot-password, reset-password.
+- [x] **M1.7** Seed the admin user.
+- [x] **M1.8** Web: API client (a fetch wrapper that parses the error envelope), auth pages with zod validation, session-aware layout, redirects (logged out goes to `/login`, logged in is kept away from auth pages), and a "verify your email" banner.
+- [x] **M1.9** Web: an empty dashboard and a header with the user menu and logout.
+- [x] **M1.10** Integration tests: signup to verify to login to logout; the reset flow; rate limiting; identical responses for known and unknown emails; rejected requests with a wrong Origin.
 
 **Done when:** a new user can sign up, open the email in Mailpit at `http://localhost:8025`, verify, log in, see an empty dashboard and log out, and the seeded admin can log in.
 
