@@ -13,7 +13,7 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
   yet (it needs root and a domain).
 - **Milestone 7:** the admin area is done (M7.1 endpoints, M7.2 pages: hosts with capacity
   bars and "add host", all PCs with filters, users with limits and disabling, usage with CSV
-  export). Not started: M7.3 draining test with a second agent, M7.4 ZFS driver, M7.5 Debian
+  export). Not started: M7.4 ZFS driver, M7.5 Debian
   image, M7.7 backups, M7.8 metrics, M7.9 security review, M7.10 load test. M7.6 (production
   packaging) was done as D.1. M7.11 (account deletion) is done.
 - **Not started:** D.3 (second host join script), milestone 8 (WebRTC).
@@ -383,7 +383,7 @@ Goal: something that can be run for real users.
 
 - [x] **M7.1** Remaining admin endpoints: VMs, users, usage.
 - [x] **M7.2** Admin UI from section 15.6.
-- [ ] **M7.3** Host draining: no new VMs on a draining host, existing ones still start.
+- [x] **M7.3** Host draining: no new VMs on a draining host, existing ones still start.
 - [ ] **M7.4** ZFS storage driver, passing the conformance suite.
 - [ ] **M7.5** The Debian image.
 - [ ] **M7.6** Production packaging: Dockerfiles for the API and the web app, a production Compose file, `infra/caddy/control-plane.Caddyfile`, `docs/DEPLOY_CONTROL_PLANE.md`.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"zynthera/internal/api/jobs"
+	"zynthera/internal/shared/vmtypes"
 )
 
 type adminVMList struct {
@@ -384,5 +385,78 @@ func TestAccountDeletion(t *testing.T) {
 	// The only administrator cannot delete their own account.
 	if res := v.admin.post("/api/auth/delete-account", map[string]string{"password": "a-good-password"}); res.Status != 409 || res.Error.Code != "last_admin" {
 		t.Errorf("last admin deleting themselves: %d %s", res.Status, res.Raw)
+	}
+}
+
+// Milestone 7's "done when": a second host can be registered and receives
+// new PCs while the first is draining; PCs on the draining host still start.
+func TestDrainingHost(t *testing.T) {
+	v := newVMApp(t)
+	alex := v.verifiedUser("alex@example.com")
+	ctx := context.Background()
+
+	onFirst := v.createVM(alex, "on the first host").ID.String()
+	v.act(alex, onFirst, "force-stop", 202)
+	v.waitState(alex, onFirst, "stopped")
+
+	// A second host comes online with the same image.
+	second := v.createHost(v.admin, "host-2", "http://127.0.0.1:1")
+	hb := vmtypes.Heartbeat{
+		HostID: second.Host.ID.String(), AgentVersion: "0.1.0",
+		Capacity: vmtypes.Capacity{TotalRAMMB: 65536, TotalVCPUs: 32, TotalDiskGB: 1000, FreeDiskGB: 1000},
+		Images:   []vmtypes.ImageRef{{Slug: "ubuntu-24.04-xfce", Version: "2026.11.1"}},
+		VMs:      []vmtypes.VMStatus{},
+	}
+	if got := v.postHeartbeat(second.AgentToken, hb); got != 200 {
+		t.Fatalf("second host heartbeat: %d", got)
+	}
+
+	hostOf := func(id string) string {
+		var name string
+		if err := v.pool.QueryRow(ctx, `SELECT h.name FROM vms JOIN hosts h ON h.id = vms.host_id WHERE vms.id = $1`, id).Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		return name
+	}
+
+	// Drain the first host.
+	if res := v.admin.do("PATCH", "/api/admin/hosts/"+v.hostID, map[string]any{"admin_state": "draining"}); res.Status != 200 {
+		t.Fatalf("drain: %d %s", res.Status, res.Raw)
+	}
+
+	// A new PC must land on the second host. (That host has no real agent
+	// in this test, so the PC cannot be set up; only its placement matters.)
+	res := alex.post("/api/vms", createBody("after draining"))
+	if res.Status != 202 {
+		t.Fatalf("create while draining: %d %s", res.Status, res.Raw)
+	}
+	if got := hostOf(decodeVM(t, res.Raw).ID.String()); got != "host-2" {
+		t.Errorf("new pc was placed on %q, want host-2", got)
+	}
+
+	// The PC that already lives on the draining host still starts, so its
+	// owner is not locked out.
+	v.act(alex, onFirst, "start", 202)
+	v.waitState(alex, onFirst, "running")
+	if got := hostOf(onFirst); got != "local" {
+		t.Errorf("existing pc moved to %q", got)
+	}
+
+	// With both hosts unable to take new PCs, creation is refused clearly.
+	if res := v.admin.do("PATCH", "/api/admin/hosts/"+second.Host.ID.String(), map[string]any{"admin_state": "draining"}); res.Status != 200 {
+		t.Fatalf("drain second: %d", res.Status)
+	}
+	if res := alex.post("/api/vms", createBody("nowhere to go")); res.Status != 503 || res.Error.Code != "no_capacity" {
+		t.Errorf("create with every host draining: %d %s", res.Status, res.Raw)
+	}
+
+	// A disabled host starts nothing.
+	v.act(alex, onFirst, "force-stop", 202)
+	v.waitState(alex, onFirst, "stopped")
+	if res := v.admin.do("PATCH", "/api/admin/hosts/"+v.hostID, map[string]any{"admin_state": "disabled"}); res.Status != 200 {
+		t.Fatalf("disable: %d", res.Status)
+	}
+	if res := alex.post("/api/vms/"+onFirst+"/start", nil); res.Status != 503 || res.Error.Code != "host_unavailable" {
+		t.Errorf("start on a disabled host: %d %s", res.Status, res.Raw)
 	}
 }
