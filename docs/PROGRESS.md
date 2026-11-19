@@ -11,9 +11,12 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 - **Deployment:** production images, Compose file, Caddy configs, `install.sh`, `doctor.sh`,
   `update.sh` and the guides are written. The installer has not been run on a fresh server
   yet (it needs root and a domain).
-- **Not started:** Milestone 7 (admin UI and remaining admin endpoints, ZFS driver, Debian
-  image, backups, metrics, security review, load test, account deletion), D.3 (second host
-  join script), milestone 8 (WebRTC).
+- **Milestone 7:** the admin area is done (M7.1 endpoints, M7.2 pages: hosts with capacity
+  bars and "add host", all PCs with filters, users with limits and disabling, usage with CSV
+  export). Not started: M7.3 draining test with a second agent, M7.4 ZFS driver, M7.5 Debian
+  image, M7.7 backups, M7.8 metrics, M7.9 security review, M7.10 load test, M7.11 account
+  deletion. M7.6 (production packaging) was done as D.1.
+- **Not started:** D.3 (second host join script), milestone 8 (WebRTC).
 
 ### Next steps, in order
 
@@ -25,7 +28,8 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 2. Run `scripts/install.sh` on a fresh Ubuntu 24.04 server and fix whatever the first real
    run turns up. Then tick D.2, D.4, D.5 and M5.1.
 3. M5.11 `scripts/acceptance.sh`, including the isolation checks of acceptance step 10.
-4. Milestone 7, starting with M7.1/M7.2 (admin area).
+4. The rest of milestone 7, starting with M7.9 (security review against spec section 16)
+   and M7.11 (account deletion).
 
 ### This machine's local setup
 
@@ -378,8 +382,8 @@ Goal: users can move files in and out, and manage snapshots from the UI.
 
 Goal: something that can be run for real users.
 
-- [ ] **M7.1** Remaining admin endpoints: VMs, users, usage.
-- [ ] **M7.2** Admin UI from section 15.6.
+- [x] **M7.1** Remaining admin endpoints: VMs, users, usage.
+- [x] **M7.2** Admin UI from section 15.6.
 - [ ] **M7.3** Host draining: no new VMs on a draining host, existing ones still start.
 - [ ] **M7.4** ZFS storage driver, passing the conformance suite.
 - [ ] **M7.5** The Debian image.

@@ -72,8 +72,6 @@ function Dashboard() {
           ))}
         </div>
       )}
-
-      {user.role === "admin" && <Notice>You are signed in as an administrator.</Notice>}
     </section>
   );
 }

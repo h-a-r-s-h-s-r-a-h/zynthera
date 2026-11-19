@@ -49,6 +49,11 @@ export function SiteHeader() {
         {/* Nothing is shown until we know whether someone is logged in. */}
         {user ? (
           <nav aria-label="Account" className="flex items-center gap-3">
+            {user.role === "admin" && (
+              <ButtonLink href="/admin/hosts" variant="ghost">
+                Admin
+              </ButtonLink>
+            )}
             <span
               className="hidden max-w-56 truncate text-sm text-text-muted sm:inline"
               title={user.email}

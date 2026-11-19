@@ -92,5 +92,8 @@ test("the seeded admin can log in", async ({ page }) => {
   await page.getByLabel("Password").fill("dev-only-admin-password");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByText("You are signed in as an administrator.")).toBeVisible();
+  // Administrators get a link to the admin area; normal users do not.
+  await page.getByRole("link", { name: "Admin" }).click();
+  await expect(page).toHaveURL(/\/admin\/hosts$/);
+  await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
 });

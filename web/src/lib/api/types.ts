@@ -144,3 +144,63 @@ export interface FileEntry {
   size: number;
   modified: string;
 }
+
+/** internal/api/httpapi/hosts.go: hostJSON */
+export interface Host {
+  id: string;
+  name: string;
+  agent_url: string;
+  public_url: string;
+  admin_state: "active" | "draining" | "disabled";
+  online: boolean;
+  last_heartbeat_at: string | null;
+  agent_version: string | null;
+  total_ram_mb: number;
+  total_vcpus: number;
+  total_disk_gb: number;
+  free_disk_gb: number;
+  reserved_ram_mb: number;
+  cpu_overcommit: number;
+  images: { slug: string; version: string }[];
+  created_at: string;
+  used_ram_mb: number;
+  used_vcpus: number;
+  committed_disk_gb: number;
+  vm_count: number;
+}
+
+/** internal/api/httpapi/admin_handlers.go: adminVMJSON */
+export interface AdminVM extends VM {
+  user_id: string;
+  user_email: string;
+  host_id: string;
+  host_name: string;
+}
+
+/** internal/api/httpapi/admin_handlers.go: adminUserJSON */
+export interface AdminUser extends User {
+  disabled: boolean;
+  max_vms: number | null;
+  max_ram_mb: number | null;
+  max_vcpus: number | null;
+  max_disk_gb: number | null;
+  vm_count: number;
+  used_ram_mb: number;
+  used_disk_gb: number;
+}
+
+export interface UserLimitDefaults {
+  max_vms: number;
+  max_ram_mb: number;
+  max_vcpus: number;
+  max_disk_gb: number;
+}
+
+/** internal/api/httpapi/admin_handlers.go: usageRowJSON */
+export interface UsageRow {
+  user_id: string;
+  user_email: string;
+  ram_mb: number;
+  vcpus: number;
+  hours: number;
+}
