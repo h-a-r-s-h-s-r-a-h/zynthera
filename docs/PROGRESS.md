@@ -6,7 +6,19 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 
 - **Done:** Milestone 0 (foundations), Milestone 1 (accounts), Milestone 2 (host agent with
   the mock driver).
-- **Next:** Milestone 3 (VM lifecycle in the control plane), starting at M3.1.
+- **In progress:** Milestone 3 (VM lifecycle in the control plane). Done so far: M3.1 tables,
+  queries and image seed; M3.2 state machine; the pure half of M3.4 (`internal/api/scheduler`,
+  capacity arithmetic with tests); asynq v0.26 added to `go.mod`.
+- **Next:** the rest of milestone 3, in this order:
+  1. `internal/api/vmsvc`: one service used by handlers and jobs. `Begin` (lock host, check
+     capacity, lock the VM row, compare-and-set into the transitional state) and `Settle`
+     (leave the transitional state, write the event, open or close the usage interval, publish).
+  2. `internal/api/jobs`: asynq client, server with the three queues, one handler per task
+     from spec 10.5, and the periodic tasks.
+  3. `internal/api/events`: Redis pub/sub per user and `GET /api/events` (Server-Sent Events).
+  4. VM, snapshot, image and options handlers in `internal/api/httpapi`.
+  5. Store the heartbeat's VM list in Redis (last two per host) for the reconciler.
+  6. M3.12: the full lifecycle integration test.
 - **Mode:** mock driver for milestones 0 to 4, then real KVM on this machine from milestone 5.
 
 ## Environment check (M0.1, 2026-11-19)
@@ -152,8 +164,8 @@ Goal: the control plane knows about a host and can drive fake VMs on it.
 
 Goal: the full lifecycle works through the API, with correct state handling under failure and concurrency.
 
-- [ ] **M3.1** Migrations for `os_images`, `vms`, `vm_events`, `snapshots`, `usage_intervals`. Seed the image rows.
-- [ ] **M3.2** State machine package with table-driven tests covering every action in every state.
+- [x] **M3.1** Migrations for `os_images`, `vms`, `vm_events`, `snapshots`, `usage_intervals`. Seed the image rows.
+- [x] **M3.2** State machine package with table-driven tests covering every action in every state.
 - [ ] **M3.3** asynq wiring: client, server, the three queues, task constructors, logging and panic-recovery middleware, periodic task registration.
 - [ ] **M3.4** Scheduler package: host choice and capacity check under a host row lock, with a test that fires concurrent starts at a nearly full host.
 - [ ] **M3.5** Validation and limits. `GET /api/images` and `GET /api/options`.
