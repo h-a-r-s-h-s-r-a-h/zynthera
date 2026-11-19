@@ -54,12 +54,13 @@ export function SiteHeader() {
                 Admin
               </ButtonLink>
             )}
-            <span
-              className="hidden max-w-56 truncate text-sm text-text-muted sm:inline"
-              title={user.email}
+            <Link
+              href="/account"
+              className="hidden max-w-56 truncate text-sm text-text-muted hover:text-text sm:inline"
+              title={`${user.email} (account settings)`}
             >
               {user.email}
-            </span>
+            </Link>
             <Button variant="secondary" busy={logout.isPending} onClick={onLogout}>
               Log out
             </Button>

@@ -52,6 +52,7 @@ func (w *Worker) Mux() *asynq.ServeMux {
 	mux.HandleFunc(TypeCronReconcile, w.cronReconcile)
 	mux.HandleFunc(TypeCronStuckVMs, w.cronStuckVMs)
 	mux.HandleFunc(TypeCronSessionCleanup, w.cronSessionCleanup)
+	mux.HandleFunc(TypeCronAccountCleanup, w.cronAccountCleanup)
 	return mux
 }
 

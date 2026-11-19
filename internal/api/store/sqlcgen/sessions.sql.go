@@ -81,7 +81,7 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID uuid.UUID) erro
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT users.id, users.email, users.password_hash, users.role, users.email_verified_at, users.disabled_at, users.max_vms, users.max_ram_mb, users.max_vcpus, users.max_disk_gb, users.created_at, users.updated_at, sessions.id AS session_id, sessions.last_seen_at AS session_last_seen_at
+SELECT users.id, users.email, users.password_hash, users.role, users.email_verified_at, users.disabled_at, users.max_vms, users.max_ram_mb, users.max_vcpus, users.max_disk_gb, users.created_at, users.updated_at, users.deletion_requested_at, sessions.id AS session_id, sessions.last_seen_at AS session_last_seen_at
 FROM sessions
 JOIN users ON users.id = sessions.user_id
 WHERE sessions.token_hash = $1
@@ -112,6 +112,7 @@ func (q *Queries) GetSessionUser(ctx context.Context, tokenHash []byte) (GetSess
 		&i.User.MaxDiskGb,
 		&i.User.CreatedAt,
 		&i.User.UpdatedAt,
+		&i.User.DeletionRequestedAt,
 		&i.SessionID,
 		&i.SessionLastSeenAt,
 	)

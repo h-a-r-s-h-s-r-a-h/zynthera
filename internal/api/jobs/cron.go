@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"zynthera/internal/api/heartbeats"
@@ -220,4 +221,76 @@ func (w *Worker) cronSessionCleanup(ctx context.Context, _ *asynq.Task) error {
 		w.Logger.InfoContext(ctx, "cleanup", "expired_sessions", sessions, "expired_email_tokens", tokens)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------- account deletion
+
+// DeleteUserVMs starts the deletion of every PC of a user that can be
+// deleted right now, and reports how many PCs the user still has. PCs a job
+// is working on are skipped; the next run picks them up.
+func DeleteUserVMs(ctx context.Context, svc *vmsvc.Service, queue Enqueuer, userID uuid.UUID) (remaining int, err error) {
+	list, err := svc.Q.ListVMsOfUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	for _, vm := range list {
+		if _, _, err := svc.Begin(ctx, vm.ID, vms.ActionDelete, vmsvc.BeginOpts{}); err != nil {
+			if errors.Is(err, vmsvc.ErrInvalidState) || errors.Is(err, vmsvc.ErrNotFound) {
+				continue
+			}
+			return len(list), err
+		}
+		if err := queue.Enqueue(ctx, TypeDelete, Payload{VMID: vm.ID, Actor: "user"}); err != nil {
+			return len(list), err
+		}
+	}
+	return len(list), nil
+}
+
+// cronAccountCleanup finishes account deletions. For each account whose
+// owner asked for deletion it deletes the remaining PCs, and once none is
+// left it removes everything that identifies the person.
+func (w *Worker) cronAccountCleanup(ctx context.Context, _ *asynq.Task) error {
+	users, err := w.Svc.Q.ListUsersPendingDeletion(ctx)
+	if err != nil {
+		return err
+	}
+	for _, user := range users {
+		remaining, err := DeleteUserVMs(ctx, w.Svc, w.Queue, user.ID)
+		if err != nil {
+			w.Logger.ErrorContext(ctx, "account cleanup: delete vms", "user_id", user.ID.String(), "error", err.Error())
+			continue
+		}
+		if remaining > 0 {
+			continue // their PCs are still being deleted; finish next time
+		}
+		if err := w.finishAccountDeletion(ctx, user.ID); err != nil {
+			w.Logger.ErrorContext(ctx, "account cleanup: anonymize", "user_id", user.ID.String(), "error", err.Error())
+			continue
+		}
+		w.Logger.InfoContext(ctx, "account deleted", "user_id", user.ID.String())
+	}
+	return nil
+}
+
+func (w *Worker) finishAccountDeletion(ctx context.Context, userID uuid.UUID) error {
+	tx, err := w.Svc.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	q := w.Svc.Q.WithTx(tx)
+	if err := q.DeleteUserSessions(ctx, userID); err != nil {
+		return err
+	}
+	if err := q.DeleteUserEmailTokens(ctx, userID); err != nil {
+		return err
+	}
+	if err := q.ScrubUserVMNames(ctx, userID); err != nil {
+		return err
+	}
+	if err := q.AnonymizeUser(ctx, userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

@@ -93,7 +93,43 @@ test("the seeded admin can log in", async ({ page }) => {
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
   // Administrators get a link to the admin area; normal users do not.
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.getByRole("link", { name: "Admin", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/hosts$/);
   await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
+});
+
+test("a user can delete their account", async ({ page, request }) => {
+  const email = uniqueEmail("leaving");
+  const password = "a-good-password";
+  await request.post("/api/auth/signup", {
+    data: { email, password },
+    headers: { Origin: "http://localhost:3000" },
+  });
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+
+  await page.getByRole("link", { name: email }).click();
+  await expect(page.getByRole("heading", { name: "Your account", exact: true })).toBeVisible();
+
+  const deleteButton = page.getByRole("button", { name: "Delete my account" });
+  await expect(deleteButton).toBeDisabled();
+  await page.getByLabel(/I understand/).check();
+  await page.getByLabel("Your password").fill("not-my-password");
+  await deleteButton.click();
+  await expect(page.getByText("That is not your password.")).toBeVisible();
+
+  await page.getByLabel("Your password").fill(password);
+  await deleteButton.click();
+  await expect(page).toHaveURL(/\/\?account=deleted$/);
+  await expect(page.getByText("Your account was deleted.")).toBeVisible();
+
+  // The account is gone: logging in no longer works.
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText("Wrong email or password.");
 });

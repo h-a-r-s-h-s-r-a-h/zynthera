@@ -101,3 +101,16 @@ export function useResetPassword() {
     onSuccess: () => switchUser(queryClient, null),
   });
 }
+
+/**
+ * Deletes the account. The cached identity is left alone on purpose: the
+ * caller leaves with a full page load, which starts from a clean state.
+ * Clearing it here would make the page's login guard redirect to /login
+ * before the caller can show its confirmation.
+ */
+export function useDeleteAccount() {
+  return useMutation({
+    mutationFn: (password: string) =>
+      api<{ status: string }>("/auth/delete-account", { method: "POST", body: { password } }),
+  });
+}

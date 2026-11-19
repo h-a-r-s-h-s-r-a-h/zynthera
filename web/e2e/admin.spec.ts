@@ -16,7 +16,7 @@ async function logIn(page: Page, email: string, password: string) {
 test("a normal user cannot open the admin area", async ({ page, request }) => {
   const user = await verifiedAccount(request, "notadmin");
   await logIn(page, user.email, user.password);
-  await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Admin", exact: true })).toHaveCount(0);
   await page.goto("/admin/vms");
   await expect(page.getByText("This area is for administrators")).toBeVisible();
   // And the API refuses, whatever the page shows.
@@ -52,7 +52,7 @@ test("admin: hosts, a user's PC, limits and usage", async ({ browser, request })
   const adminContext = await browser.newContext();
   const page = await adminContext.newPage();
   await logIn(page, admin.email, admin.password);
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.getByRole("link", { name: "Admin", exact: true }).click();
   const host = page.getByTestId("host-card").first();
   await expect(host).toContainText("local");
   await expect(host).toContainText("Online");

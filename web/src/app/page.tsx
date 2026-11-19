@@ -1,9 +1,15 @@
+import { Suspense } from "react";
+import { AccountDeletedNotice } from "@/components/account-deleted-notice";
 import { ApiHealth } from "@/components/api-health";
 import { ButtonLink } from "@/components/ui";
 
 export default function LandingPage() {
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-start justify-center gap-6 px-4 py-16">
+      {/* Reads the address, which is only known in the browser. */}
+      <Suspense fallback={null}>
+        <AccountDeletedNotice />
+      </Suspense>
       <h1 className="max-w-2xl text-4xl font-semibold tracking-tight sm:text-5xl">
         Your own Linux computer, in a browser tab.
       </h1>

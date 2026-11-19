@@ -71,6 +71,7 @@ var periodic = []struct {
 	{"@every 30s", TypeCronReconcile, 25 * time.Second},
 	{"@every 2m", TypeCronStuckVMs, 100 * time.Second},
 	{"@every 1h", TypeCronSessionCleanup, 5 * time.Minute},
+	{"@every 1m", TypeCronAccountCleanup, 50 * time.Second},
 }
 
 // NewScheduler builds the periodic task scheduler. Only one instance may run

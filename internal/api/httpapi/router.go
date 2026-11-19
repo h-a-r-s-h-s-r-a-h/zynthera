@@ -130,6 +130,7 @@ func NewRouter(d Deps) (http.Handler, error) {
 				r.Use(requireUser)
 				r.Get("/me", s.handleMe)
 				r.Post("/resend-verification", s.handleResendVerification)
+				r.Post("/delete-account", s.handleDeleteAccount)
 			})
 		})
 

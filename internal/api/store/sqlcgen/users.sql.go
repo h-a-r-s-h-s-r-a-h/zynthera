@@ -11,11 +11,40 @@ import (
 	"github.com/google/uuid"
 )
 
+const anonymizeUser = `-- name: AnonymizeUser :exec
+UPDATE users
+SET email = 'deleted-' || id::text || '@deleted.invalid',
+    password_hash = '!',
+    email_verified_at = NULL,
+    max_vms = NULL, max_ram_mb = NULL, max_vcpus = NULL, max_disk_gb = NULL,
+    disabled_at = COALESCE(disabled_at, now()),
+    updated_at = now()
+WHERE id = $1
+`
+
+// Removes everything that identifies the person. The row itself stays,
+// because deleted PCs and usage records (kept for billing) refer to it.
+func (q *Queries) AnonymizeUser(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, anonymizeUser, id)
+	return err
+}
+
+const countAdmins = `-- name: CountAdmins :one
+SELECT count(*)::int FROM users WHERE role = 'admin' AND disabled_at IS NULL
+`
+
+func (q *Queries) CountAdmins(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, countAdmins)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash)
 VALUES ($1, $2)
 ON CONFLICT (email) DO NOTHING
-RETURNING id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at
+RETURNING id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at, deletion_requested_at
 `
 
 type CreateUserParams struct {
@@ -39,12 +68,22 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.MaxDiskGb,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionRequestedAt,
 	)
 	return i, err
 }
 
+const deleteUserEmailTokens = `-- name: DeleteUserEmailTokens :exec
+DELETE FROM email_tokens WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserEmailTokens(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserEmailTokens, userID)
+	return err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at FROM users WHERE email = $1
+SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at, deletion_requested_at FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -63,12 +102,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.MaxDiskGb,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionRequestedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at FROM users WHERE id = $1
+SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at, deletion_requested_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -87,8 +127,94 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.MaxDiskGb,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionRequestedAt,
 	)
 	return i, err
+}
+
+const listUsersPendingDeletion = `-- name: ListUsersPendingDeletion :many
+SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at, deletion_requested_at FROM users WHERE deletion_requested_at IS NOT NULL AND email NOT LIKE 'deleted-%@deleted.invalid'
+`
+
+func (q *Queries) ListUsersPendingDeletion(ctx context.Context) ([]User, error) {
+	rows, err := q.db.Query(ctx, listUsersPendingDeletion)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.PasswordHash,
+			&i.Role,
+			&i.EmailVerifiedAt,
+			&i.DisabledAt,
+			&i.MaxVms,
+			&i.MaxRamMb,
+			&i.MaxVcpus,
+			&i.MaxDiskGb,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletionRequestedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVMsOfUser = `-- name: ListVMsOfUser :many
+SELECT id, user_id, host_id, os_image_id, image_version, name, ram_mb, vcpus, disk_gb, linux_username, pending_password_hash, state, state_changed_at, state_detail, has_saved_state, viewer_connected, last_active_at, keep_alive_until, disk_used_bytes, created_at, updated_at, deleted_at FROM vms WHERE user_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) ListVMsOfUser(ctx context.Context, userID uuid.UUID) ([]Vm, error) {
+	rows, err := q.db.Query(ctx, listVMsOfUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Vm{}
+	for rows.Next() {
+		var i Vm
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.HostID,
+			&i.OsImageID,
+			&i.ImageVersion,
+			&i.Name,
+			&i.RamMb,
+			&i.Vcpus,
+			&i.DiskGb,
+			&i.LinuxUsername,
+			&i.PendingPasswordHash,
+			&i.State,
+			&i.StateChangedAt,
+			&i.StateDetail,
+			&i.HasSavedState,
+			&i.ViewerConnected,
+			&i.LastActiveAt,
+			&i.KeepAliveUntil,
+			&i.DiskUsedBytes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markEmailVerified = `-- name: MarkEmailVerified :exec
@@ -99,6 +225,28 @@ WHERE id = $1
 
 func (q *Queries) MarkEmailVerified(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markEmailVerified, id)
+	return err
+}
+
+const requestAccountDeletion = `-- name: RequestAccountDeletion :exec
+UPDATE users
+SET disabled_at = COALESCE(disabled_at, now()), deletion_requested_at = now(), updated_at = now()
+WHERE id = $1
+`
+
+// Disables the account immediately and marks it for deletion.
+func (q *Queries) RequestAccountDeletion(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, requestAccountDeletion, id)
+	return err
+}
+
+const scrubUserVMNames = `-- name: ScrubUserVMNames :exec
+UPDATE vms SET name = 'deleted', linux_username = 'deleted' WHERE user_id = $1
+`
+
+// PC names and Linux usernames were chosen by the person and may identify them.
+func (q *Queries) ScrubUserVMNames(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, scrubUserVMNames, userID)
 	return err
 }
 
@@ -123,7 +271,7 @@ ON CONFLICT (email) DO UPDATE
 SET role = 'admin',
     email_verified_at = COALESCE(users.email_verified_at, now()),
     updated_at = now()
-RETURNING id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at
+RETURNING id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at, deletion_requested_at
 `
 
 type UpsertAdminUserParams struct {
@@ -149,6 +297,7 @@ func (q *Queries) UpsertAdminUser(ctx context.Context, arg UpsertAdminUserParams
 		&i.MaxDiskGb,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionRequestedAt,
 	)
 	return i, err
 }

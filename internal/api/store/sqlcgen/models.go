@@ -87,18 +87,19 @@ type UsageInterval struct {
 }
 
 type User struct {
-	ID              uuid.UUID
-	Email           string
-	PasswordHash    string
-	Role            string
-	EmailVerifiedAt *time.Time
-	DisabledAt      *time.Time
-	MaxVms          pgtype.Int4
-	MaxRamMb        pgtype.Int4
-	MaxVcpus        pgtype.Int4
-	MaxDiskGb       pgtype.Int4
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                  uuid.UUID
+	Email               string
+	PasswordHash        string
+	Role                string
+	EmailVerifiedAt     *time.Time
+	DisabledAt          *time.Time
+	MaxVms              pgtype.Int4
+	MaxRamMb            pgtype.Int4
+	MaxVcpus            pgtype.Int4
+	MaxDiskGb           pgtype.Int4
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	DeletionRequestedAt *time.Time
 }
 
 type Vm struct {

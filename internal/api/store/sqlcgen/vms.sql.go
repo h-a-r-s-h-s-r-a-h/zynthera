@@ -784,7 +784,7 @@ func (q *Queries) LockHost(ctx context.Context, id uuid.UUID) (Host, error) {
 }
 
 const lockUser = `-- name: LockUser :one
-SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at FROM users WHERE id = $1 FOR NO KEY UPDATE
+SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at, deletion_requested_at FROM users WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // Taken while checking per-user limits, so two creations cannot both pass.
@@ -804,6 +804,7 @@ func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.MaxDiskGb,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionRequestedAt,
 	)
 	return i, err
 }

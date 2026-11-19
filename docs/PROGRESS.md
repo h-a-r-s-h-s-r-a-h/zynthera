@@ -14,8 +14,8 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 - **Milestone 7:** the admin area is done (M7.1 endpoints, M7.2 pages: hosts with capacity
   bars and "add host", all PCs with filters, users with limits and disabling, usage with CSV
   export). Not started: M7.3 draining test with a second agent, M7.4 ZFS driver, M7.5 Debian
-  image, M7.7 backups, M7.8 metrics, M7.9 security review, M7.10 load test, M7.11 account
-  deletion. M7.6 (production packaging) was done as D.1.
+  image, M7.7 backups, M7.8 metrics, M7.9 security review, M7.10 load test. M7.6 (production
+  packaging) was done as D.1. M7.11 (account deletion) is done.
 - **Not started:** D.3 (second host join script), milestone 8 (WebRTC).
 
 ### Next steps, in order
@@ -28,8 +28,7 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 2. Run `scripts/install.sh` on a fresh Ubuntu 24.04 server and fix whatever the first real
    run turns up. Then tick D.2, D.4, D.5 and M5.1.
 3. M5.11 `scripts/acceptance.sh`, including the isolation checks of acceptance step 10.
-4. The rest of milestone 7, starting with M7.9 (security review against spec section 16)
-   and M7.11 (account deletion).
+4. The rest of milestone 7, starting with M7.9 (security review against spec section 16).
 
 ### This machine's local setup
 
@@ -392,7 +391,7 @@ Goal: something that can be run for real users.
 - [ ] **M7.8** Metrics endpoints in Prometheus format on the API and the agent: job counts and durations, VMs by state, host capacity, open streams.
 - [ ] **M7.9** Review the code against every item in section 16. Fix what you find and write the result to `docs/SECURITY_REVIEW.md`.
 - [ ] **M7.10** Load test script: create, suspend and resume many VMs in parallel. Record timings and failures.
-- [ ] **M7.11** Account deletion: a user can delete their account, which deletes their VMs and data.
+- [x] **M7.11** Account deletion: a user can delete their account, which deletes their VMs and data.
 
 **Done when:** all of section 19 passes, and a second host (a second mock agent is enough) can be registered and receives new VMs while the first is draining.
 

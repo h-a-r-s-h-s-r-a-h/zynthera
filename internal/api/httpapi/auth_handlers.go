@@ -432,3 +432,65 @@ func (s *server) suspendOnLogout(ctx context.Context, user sqlcgen.User) {
 		}
 	}
 }
+
+// POST /api/auth/delete-account  { password }
+//
+// The account is disabled at once and its PCs start being deleted. A
+// periodic task finishes the job and then removes everything that
+// identifies the person (jobs.cronAccountCleanup).
+func (s *server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	user, _ := currentUser(r.Context())
+	var req struct {
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	// Deleting an account is final, so the password is asked again: a
+	// session left open on a shared computer is not enough.
+	if !s.allow(w, r, auth.RuleLoginPerIPEmail, clientIP(r).String()+"|"+strings.ToLower(user.Email)) {
+		return
+	}
+	match := false
+	if req.Password != "" && len(req.Password) <= 4*auth.MaxPasswordLength {
+		ok, err := auth.VerifyPassword(req.Password, user.PasswordHash)
+		if err != nil {
+			s.internal(w, r, "verify password", err)
+			return
+		}
+		match = ok
+	}
+	if !match {
+		writeValidation(w, fieldErrors{"password": "That is not your password."})
+		return
+	}
+	if user.Role == "admin" {
+		admins, err := s.Q.CountAdmins(r.Context())
+		if err != nil {
+			s.internal(w, r, "count admins", err)
+			return
+		}
+		if admins <= 1 {
+			httpx.WriteError(w, http.StatusConflict, "last_admin",
+				"You are the only administrator. Make someone else an administrator first.", nil)
+			return
+		}
+	}
+
+	if err := s.Q.RequestAccountDeletion(r.Context(), user.ID); err != nil {
+		s.internal(w, r, "request account deletion", err)
+		return
+	}
+	if err := s.Q.DeleteUserSessions(r.Context(), user.ID); err != nil {
+		s.internal(w, r, "delete sessions", err)
+		return
+	}
+	s.clearSessionCookie(w)
+	// Start deleting the PCs now; whatever cannot be deleted this second
+	// is picked up by the periodic task.
+	if _, err := jobs.DeleteUserVMs(r.Context(), s.Svc, s.Queue, user.ID); err != nil {
+		s.Logger.ErrorContext(r.Context(), "delete account: delete vms", "user_id", user.ID.String(), "error", err.Error())
+	}
+	s.Logger.InfoContext(r.Context(), "account deletion requested", "user_id", user.ID.String())
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}

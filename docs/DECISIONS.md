@@ -273,3 +273,11 @@ still booting has no agent yet and ignores the ACPI button, so one early request
 ## D-047 Clock sync falls back to `date` in the guest
 
 See docs/DEPLOY_HOST.md, "Clock after resume".
+
+## D-048 Deleting an account anonymizes the user row
+
+Deleted PCs and usage records (kept for billing) refer to the user row, so it is not
+removed. The account is disabled at once; a periodic task deletes the PCs and then replaces
+the email with `deleted-<id>@deleted.invalid`, clears the password hash, and overwrites the
+PC names and Linux usernames the person chose. The original email is free for a new sign-up.
+The only remaining administrator cannot delete their own account.

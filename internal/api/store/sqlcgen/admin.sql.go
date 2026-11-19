@@ -14,7 +14,7 @@ import (
 )
 
 const adminListUsers = `-- name: AdminListUsers :many
-SELECT users.id, users.email, users.password_hash, users.role, users.email_verified_at, users.disabled_at, users.max_vms, users.max_ram_mb, users.max_vcpus, users.max_disk_gb, users.created_at, users.updated_at,
+SELECT users.id, users.email, users.password_hash, users.role, users.email_verified_at, users.disabled_at, users.max_vms, users.max_ram_mb, users.max_vcpus, users.max_disk_gb, users.created_at, users.updated_at, users.deletion_requested_at,
        (SELECT count(*) FROM vms WHERE vms.user_id = users.id AND vms.deleted_at IS NULL)::int AS vm_count,
        (SELECT COALESCE(sum(ram_mb), 0) FROM vms WHERE vms.user_id = users.id AND vms.deleted_at IS NULL)::int AS used_ram_mb,
        (SELECT COALESCE(sum(disk_gb), 0) FROM vms WHERE vms.user_id = users.id AND vms.deleted_at IS NULL)::int AS used_disk_gb
@@ -68,6 +68,7 @@ func (q *Queries) AdminListUsers(ctx context.Context, arg AdminListUsersParams) 
 			&i.User.MaxDiskGb,
 			&i.User.CreatedAt,
 			&i.User.UpdatedAt,
+			&i.User.DeletionRequestedAt,
 			&i.VmCount,
 			&i.UsedRamMb,
 			&i.UsedDiskGb,
@@ -184,7 +185,7 @@ SET max_vms = $1,
     disabled_at = $5,
     updated_at = now()
 WHERE id = $6
-RETURNING id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at
+RETURNING id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at, deletion_requested_at
 `
 
 type AdminSetUserLimitsParams struct {
@@ -221,6 +222,7 @@ func (q *Queries) AdminSetUserLimits(ctx context.Context, arg AdminSetUserLimits
 		&i.MaxDiskGb,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionRequestedAt,
 	)
 	return i, err
 }

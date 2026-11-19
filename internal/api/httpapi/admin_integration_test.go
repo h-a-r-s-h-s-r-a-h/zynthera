@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"zynthera/internal/api/jobs"
 )
 
 type adminVMList struct {
@@ -284,5 +286,103 @@ func TestAdminUsage(t *testing.T) {
 	}
 	if csvSafe("=cmd|calc") != "'=cmd|calc" || csvSafe("alex@example.com") != "alex@example.com" {
 		t.Error("csvSafe does not neutralise formulas")
+	}
+}
+
+func TestAccountDeletion(t *testing.T) {
+	v := newVMApp(t)
+	alex := v.verifiedUser("alex@example.com")
+	running := v.createVM(alex, "Alex's secret project").ID.String()
+	stopped := v.createVM(alex, "second").ID.String()
+	v.act(alex, stopped, "force-stop", 202)
+	v.waitState(alex, stopped, "stopped")
+	ctx := context.Background()
+
+	// The password is asked again; a wrong one changes nothing.
+	if res := alex.post("/api/auth/delete-account", map[string]string{"password": "not-my-password"}); res.Status != 422 {
+		t.Fatalf("wrong password: %d %s", res.Status, res.Raw)
+	}
+	if res := alex.get("/api/auth/me"); res.Status != 200 {
+		t.Fatalf("still logged in after a refused deletion: %d", res.Status)
+	}
+	if res := v.newBrowser().post("/api/auth/delete-account", map[string]string{"password": "a-good-password"}); res.Status != 401 {
+		t.Errorf("deletion without a session: %d", res.Status)
+	}
+
+	alex.mustPost(200, "/api/auth/delete-account", map[string]string{"password": "a-good-password"})
+
+	// Locked out at once, everywhere.
+	if res := alex.get("/api/auth/me"); res.Status != 401 {
+		t.Errorf("session survived account deletion: %d", res.Status)
+	}
+	if res := v.newBrowser().post("/api/auth/login", creds{"alex@example.com", "a-good-password"}); res.Status != 401 {
+		t.Errorf("login after deletion: %d", res.Status)
+	}
+
+	// Both PCs disappear from the host, including the running one.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var left int
+		if err := v.pool.QueryRow(ctx, `SELECT count(*) FROM vms WHERE deleted_at IS NULL`).Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d pcs were not deleted", left)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	for _, id := range []string{running, stopped} {
+		if st := v.hostStatus(id); st.Status != "missing" {
+			t.Errorf("pc %s still on the host: %s", id, st.Status)
+		}
+	}
+
+	// The periodic task then removes what identifies the person.
+	v.runCron(jobs.TypeCronAccountCleanup)
+	var email, hash string
+	var verified *time.Time
+	err := v.pool.QueryRow(ctx,
+		`SELECT email, password_hash, email_verified_at FROM users WHERE deletion_requested_at IS NOT NULL`).Scan(&email, &hash, &verified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(email, "alex") || !strings.HasSuffix(email, "@deleted.invalid") || hash != "!" || verified != nil {
+		t.Errorf("user not anonymized: email=%q hash=%q verified=%v", email, hash, verified)
+	}
+	var names int
+	if err := v.pool.QueryRow(ctx, `SELECT count(*) FROM vms WHERE name LIKE '%secret%' OR linux_username = 'alex'`).Scan(&names); err != nil {
+		t.Fatal(err)
+	}
+	if names != 0 {
+		t.Errorf("%d pc rows still carry the person's own names", names)
+	}
+	var sessions, tokens, usage int
+	_ = v.pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email LIKE 'deleted-%'),
+		(SELECT count(*) FROM email_tokens e JOIN users u ON u.id = e.user_id WHERE u.email LIKE 'deleted-%'),
+		(SELECT count(*) FROM usage_intervals)`).Scan(&sessions, &tokens, &usage)
+	if sessions != 0 || tokens != 0 {
+		t.Errorf("sessions=%d email tokens=%d left for the deleted account", sessions, tokens)
+	}
+	// Usage records stay (billing), now pointing at an anonymous row.
+	if usage == 0 {
+		t.Error("usage records were deleted with the account")
+	}
+	// Running the task again is harmless.
+	v.runCron(jobs.TypeCronAccountCleanup)
+
+	// The address is free again: the same person can sign up afresh.
+	fresh := v.newBrowser()
+	fresh.mustPost(202, "/api/auth/signup", creds{"alex@example.com", "another-password-1"})
+	fresh.mustPost(200, "/api/auth/login", creds{"alex@example.com", "another-password-1"})
+	if list := fresh.get("/api/vms").Raw; strings.Contains(list, running) {
+		t.Error("the new account sees the old account's pcs")
+	}
+
+	// The only administrator cannot delete their own account.
+	if res := v.admin.post("/api/auth/delete-account", map[string]string{"password": "a-good-password"}); res.Status != 409 || res.Error.Code != "last_admin" {
+		t.Errorf("last admin deleting themselves: %d %s", res.Status, res.Raw)
 	}
 }

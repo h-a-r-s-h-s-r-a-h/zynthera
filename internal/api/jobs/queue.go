@@ -32,6 +32,7 @@ const (
 	TypeCronReconcile      = "cron:reconcile"
 	TypeCronStuckVMs       = "cron:stuck_vms"
 	TypeCronSessionCleanup = "cron:session_cleanup"
+	TypeCronAccountCleanup = "cron:account_cleanup"
 )
 
 // Queue names, most urgent first.
