@@ -10,6 +10,15 @@ systemctl disable ssh.service ssh.socket >/dev/null 2>&1
 systemctl mask ssh.service ssh.socket >/dev/null 2>&1
 rm -f /etc/ssh/ssh_host_*
 
+# If the build used another mirror, point APT back at the default archive.
+if [[ -f /etc/zyn-build-mirror ]]; then
+  mirror="$(cat /etc/zyn-build-mirror)"
+  for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+    [[ -f "$f" ]] && sed -i "s|${mirror}|http://archive.ubuntu.com/ubuntu/|g" "$f"
+  done
+  rm -f /etc/zyn-build-mirror
+fi
+
 apt-get -y autoremove --purge >/dev/null 2>&1
 apt-get clean
 rm -rf /var/lib/apt/lists/*

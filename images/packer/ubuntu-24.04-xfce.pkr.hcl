@@ -23,6 +23,12 @@ variable "bridge_binary" {
   description = "Path to the statically built zynthera-file-bridge."
 }
 
+variable "apt_mirror" {
+  type        = string
+  default     = ""
+  description = "Ubuntu mirror to use during the build only, e.g. http://in.archive.ubuntu.com/ubuntu. Empty means the default archive. The finished image always points at the default archive."
+}
+
 variable "cloud_image_url" {
   type    = string
   default = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
@@ -89,7 +95,8 @@ build {
   }
 
   provisioner "shell" {
-    execute_command   = "sudo -E bash -euo pipefail '{{ .Path }}'"
+    execute_command   = "{{ .Vars }} sudo -E bash -euo pipefail '{{ .Path }}'"
+    environment_vars  = ["ZYN_APT_MIRROR=${var.apt_mirror}"]
     expect_disconnect = false
     scripts = [
       "${path.root}/../scripts/01-base.sh",

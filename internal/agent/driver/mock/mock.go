@@ -42,8 +42,8 @@ var RealisticDelays = Delays{
 // DefaultImages is what a development mock host reports. The slugs and the
 // version match the rows `zynthera-api seed` creates.
 var DefaultImages = []vmtypes.ImageRef{
-	{Slug: "ubuntu-24.04-xfce", Version: "2026.11.1"},
-	{Slug: "debian-12-xfce", Version: "2026.11.1"},
+	{Slug: "ubuntu-24.04-xfce", Version: "2026.11.2"},
+	{Slug: "debian-12-xfce", Version: "2026.11.2"},
 }
 
 // Options configures the mock driver.

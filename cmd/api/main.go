@@ -290,17 +290,17 @@ func seedDevHost(ctx context.Context, log *slog.Logger, cfg appconfig.Config, q 
 // until the others have been built.
 var seedOSImages = []sqlcgen.UpsertOSImageParams{
 	{
-		Slug: "ubuntu-24.04-xfce", DisplayName: "Ubuntu 24.04", CurrentVersion: "2026.11.1",
+		Slug: "ubuntu-24.04-xfce", DisplayName: "Ubuntu 24.04", CurrentVersion: "2026.11.2",
 		Description: "Ubuntu 24.04 LTS with the XFCE desktop. The best-supported choice.",
 		MinRamMb:    2048, MinDiskGb: 40, Enabled: true, SortOrder: 10,
 	},
 	{
-		Slug: "debian-12-xfce", DisplayName: "Debian 12", CurrentVersion: "2026.11.1",
+		Slug: "debian-12-xfce", DisplayName: "Debian 12", CurrentVersion: "2026.11.2",
 		Description: "Debian 12 with the XFCE desktop.",
 		MinRamMb:    2048, MinDiskGb: 40, Enabled: false, SortOrder: 20,
 	},
 	{
-		Slug: "fedora-xfce", DisplayName: "Fedora", CurrentVersion: "2026.11.1",
+		Slug: "fedora-xfce", DisplayName: "Fedora", CurrentVersion: "2026.11.2",
 		Description: "Fedora with the XFCE desktop.",
 		MinRamMb:    2048, MinDiskGb: 40, Enabled: false, SortOrder: 30,
 	},

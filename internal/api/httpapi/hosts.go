@@ -46,6 +46,11 @@ type hostJSON struct {
 	CPUOvercommit   float64            `json:"cpu_overcommit"`
 	Images          []vmtypes.ImageRef `json:"images"`
 	CreatedAt       time.Time          `json:"created_at"`
+	// What the host's PCs add up to (spec section 10.6).
+	UsedRAMMB       int32 `json:"used_ram_mb"`       // RAM of PCs that are running or about to run
+	UsedVCPUs       int32 `json:"used_vcpus"`        // vCPUs of the same PCs
+	CommittedDiskGB int64 `json:"committed_disk_gb"` // disk plus saved-memory room of every PC
+	VMCount         int32 `json:"vm_count"`
 }
 
 // hostOnline is the computed "online" state: a heartbeat arrived recently.
@@ -100,11 +105,25 @@ func (s *server) handleAdminListHosts(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, "list hosts", err)
 		return
 	}
+	usage, err := s.Q.HostUsageSummary(r.Context(), vms.ResourceStates)
+	if err != nil {
+		s.internal(w, r, "host usage", err)
+		return
+	}
+	byHost := make(map[uuid.UUID]sqlcgen.HostUsageSummaryRow, len(usage))
+	for _, u := range usage {
+		byHost[u.HostID] = u
+	}
 	out := make([]hostJSON, 0, len(hosts))
 	for _, h := range hosts {
-		out = append(out, s.toHostJSON(h))
+		j := s.toHostJSON(h)
+		if u, ok := byHost[h.ID]; ok {
+			j.UsedRAMMB, j.UsedVCPUs, j.VMCount = u.UsedRamMb, u.UsedVcpus, u.VmCount
+			j.CommittedDiskGB = (u.CommittedDiskMb + 1023) / 1024
+		}
+		out = append(out, j)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"hosts": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"hosts": out, "disk_headroom_percent": s.Config.DiskHeadroomPercent})
 }
 
 var hostNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)

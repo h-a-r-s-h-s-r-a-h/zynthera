@@ -3,6 +3,16 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+# Optionally use a nearer or more reliable mirror for the build. seal.sh puts
+# the default archive back, so the finished image does not depend on where it
+# was built.
+if [[ -n "${ZYN_APT_MIRROR:-}" ]]; then
+  for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+    [[ -f "$f" ]] && sed -i "s|http://archive.ubuntu.com/ubuntu/\?|${ZYN_APT_MIRROR%/}/|g" "$f"
+  done
+  echo "${ZYN_APT_MIRROR%/}/" > /etc/zyn-build-mirror
+fi
+
 apt-get update
 apt-get -y -o Dpkg::Options::=--force-confold dist-upgrade
 

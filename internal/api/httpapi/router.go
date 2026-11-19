@@ -168,6 +168,15 @@ func NewRouter(d Deps) (http.Handler, error) {
 			r.Get("/hosts", s.handleAdminListHosts)
 			r.Post("/hosts", s.handleAdminCreateHost)
 			r.Patch("/hosts/{id}", s.handleAdminPatchHost)
+
+			r.Get("/vms", s.handleAdminListVMs)
+			r.Post("/vms/{id}/suspend", s.adminVMAction(vms.ActionSuspend, jobs.TypeSuspend))
+			r.Post("/vms/{id}/force-stop", s.adminVMAction(vms.ActionForceStop, jobs.TypeForceStop))
+
+			r.Get("/users", s.handleAdminListUsers)
+			r.Patch("/users/{id}", s.handleAdminPatchUser)
+
+			r.Get("/usage", s.handleAdminUsage)
 		})
 	})
 

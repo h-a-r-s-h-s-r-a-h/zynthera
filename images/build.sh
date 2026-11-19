@@ -7,6 +7,8 @@
 #   version   date-based, for example 2026.11.1 (default: <year>.<month>.1)
 #
 # Needs KVM, Packer with the QEMU plugin, qemu-img, xorriso and Go.
+# Set ZYN_APT_MIRROR (for example http://in.archive.ubuntu.com/ubuntu) to
+# install packages from another Ubuntu mirror during the build.
 # The result goes to $ZYN_IMAGES_DIR/<slug>/<version>.qcow2
 # (default /var/lib/zynthera/images). An existing image is never overwritten:
 # VMs cloned from it read from it for their whole life.
@@ -48,6 +50,7 @@ fi
 echo "==> building $slug $version (this takes 10 to 20 minutes)"
 packer init "$template" >/dev/null
 packer build -color=false \
+  -var "apt_mirror=${ZYN_APT_MIRROR:-}" \
   -var "output_dir=$work/out" \
   -var "bridge_binary=$work/zynthera-file-bridge" \
   "$template"
