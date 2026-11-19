@@ -1,0 +1,21 @@
+# The file transfer service inside every Zynthera PC.
+# Installed but not enabled in the image: cloud-init enables it at first boot,
+# after it has created the user and written a drop-in with "User=<name>".
+[Unit]
+Description=Zynthera file bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Read by systemd as root before the service drops to the user, so the file
+# itself can stay readable by root only.
+EnvironmentFile=/etc/zynthera/file-bridge.env
+ExecStart=/usr/local/bin/zynthera-file-bridge
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

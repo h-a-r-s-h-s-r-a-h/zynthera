@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -533,4 +535,35 @@ func (d *Driver) Capacity(_ context.Context) (vmtypes.Capacity, error) {
 // Images implements driver.Driver.
 func (d *Driver) Images(_ context.Context) ([]vmtypes.ImageRef, error) {
 	return append([]vmtypes.ImageRef{}, d.opts.Images...), nil
+}
+
+// MockBridgeToken is the token of the in-process file bridges that stand in
+// for the bridges inside real guests.
+const MockBridgeToken = "mock-bridge-token"
+
+// FileBridgeHandler serves a file bridge for every mock VM under
+// /<vm id>/v1/..., each confined to that VM's files directory. The agent
+// mounts it on a loopback listener in mock mode, so the file proxy talks
+// HTTP to it exactly as it would to a bridge inside a guest.
+func (d *Driver) FileBridgeHandler(newBridge func(home, token string) (http.Handler, error)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/")
+		id, sub, ok := strings.Cut(rest, "/")
+		if !ok || !vmtypes.IsUUID(id) || d.exists(id) != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if err := os.MkdirAll(d.FilesDir(id), 0o700); err != nil {
+			http.Error(w, "mock bridge: cannot create files dir", http.StatusInternalServerError)
+			return
+		}
+		h, err := newBridge(d.FilesDir(id), MockBridgeToken)
+		if err != nil {
+			http.Error(w, "mock bridge: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/" + sub
+		h.ServeHTTP(w, r2)
+	})
 }

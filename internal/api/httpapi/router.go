@@ -153,6 +153,7 @@ func NewRouter(d Deps) (http.Handler, error) {
 				r.Post("/discard-saved-state", s.vmAction(vms.ActionDiscardSavedState, jobs.TypeDiscard, ""))
 				r.Get("/events", s.handleVMEvents)
 				r.Post("/stream-token", s.handleStreamToken)
+				r.Post("/files-token", s.handleFilesToken)
 
 				r.Get("/snapshots", s.handleListSnapshots)
 				r.Post("/snapshots", s.handleCreateSnapshot)

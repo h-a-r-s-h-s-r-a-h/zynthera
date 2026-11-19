@@ -1,0 +1,9 @@
+#cloud-config
+# Used only while the image is being built. The user is removed by seal.sh.
+users:
+  - name: zynbuild
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: zynbuild
+ssh_pwauth: true

@@ -10,6 +10,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -20,14 +23,20 @@ import (
 
 	"zynthera/internal/agent/agentconfig"
 	"zynthera/internal/agent/driver/mock"
+	"zynthera/internal/agent/files"
 	"zynthera/internal/agent/heartbeat"
 	agentserver "zynthera/internal/agent/server"
 	"zynthera/internal/agent/stream"
 	"zynthera/internal/api/jobs"
 	"zynthera/internal/api/vmsvc"
+	"zynthera/internal/bridge"
 	"zynthera/internal/shared/logging"
 	"zynthera/internal/shared/vmtypes"
 )
+
+// testMaxUploadBytes is the upload limit of the test agent: small, so the
+// limit can be exercised without moving gigabytes.
+const testMaxUploadBytes = 1 << 20
 
 // vmApp is a testApp with one online host: a real agent with the mock driver.
 type vmApp struct {
@@ -90,9 +99,25 @@ func newVMApp(t *testing.T) *vmApp {
 		}
 	}
 	proxy := stream.New([]byte(created.StreamSecret), testOrigin, drv, log, notify)
+
+	// The stand-in file bridges of the mock VMs, reached over HTTP exactly
+	// like a bridge inside a real guest.
+	bridgeSrv := httptest.NewServer(drv.FileBridgeHandler(func(home, token string) (http.Handler, error) {
+		b, err := bridge.New(home, token, 0)
+		if err != nil {
+			return nil, err
+		}
+		return b.Handler(), nil
+	}))
+	t.Cleanup(bridgeSrv.Close)
+	resolver := files.Static(func(_ context.Context, vmID string) (string, string, error) {
+		return bridgeSrv.URL + "/" + vmID, mock.MockBridgeToken, nil
+	})
+	fileProxy := files.New([]byte(created.StreamSecret), testOrigin, drv, resolver, log, testMaxUploadBytes)
+
 	agentHandler = agentserver.NewRouter(agentserver.Deps{
 		Config: agentconfig.Config{VMDriver: "mock", Token: created.AgentToken}, Logger: log, Driver: drv,
-		Stream: proxy, OnVMStopped: proxy.CloseVM,
+		Stream: proxy, Files: fileProxy.Handler(), OnVMStopped: proxy.CloseVM,
 	})
 	sender := &heartbeat.Sender{
 		HostID: hostID, Version: agentserver.Version, APIURL: app.srv.URL,
@@ -1154,5 +1179,176 @@ func TestStreamEventsAreAuthenticatedPerHost(t *testing.T) {
 	}
 	if vm := v.getVM(b, id); !vm.ViewerConnected {
 		t.Fatal("viewer flag not set by the vm's own host")
+	}
+}
+
+type filesTokenJSON struct {
+	BaseURL   string    `json:"base_url"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (v *vmApp) filesToken(b *browser, id string) filesTokenJSON {
+	v.t.Helper()
+	res := b.post("/api/vms/"+id+"/files-token", nil)
+	if res.Status != 200 {
+		v.t.Fatalf("files token: %d %s", res.Status, res.Raw)
+	}
+	var out filesTokenJSON
+	if err := json.Unmarshal([]byte(res.Raw), &out); err != nil {
+		v.t.Fatal(err)
+	}
+	return out
+}
+
+// agentCall is a browser-style request straight to the agent.
+func agentCall(t *testing.T, method, rawURL, bearerToken, origin string, body io.Reader) (int, http.Header, string) {
+	t.Helper()
+	req, err := http.NewRequest(method, rawURL, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(res.Body)
+	return res.StatusCode, res.Header, string(raw)
+}
+
+// Browser to agent to file bridge and back, through the real token flow.
+func TestFileTransferEndToEnd(t *testing.T) {
+	v := newVMApp(t)
+	b := v.verifiedUser("alex@example.com")
+	other := v.verifiedUser("other@example.com")
+	id := v.createVM(b, "My PC").ID.String()
+	otherID := v.createVM(other, "Theirs").ID.String()
+
+	if res := other.post("/api/vms/"+id+"/files-token", nil); res.Status != 404 {
+		t.Fatalf("another user's files token: %d", res.Status)
+	}
+	ft := v.filesToken(b, id)
+	if !strings.HasSuffix(ft.BaseURL, "/files") {
+		t.Fatalf("base url = %q", ft.BaseURL)
+	}
+	if ttl := time.Until(ft.ExpiresAt); ttl < 9*time.Minute || ttl > 11*time.Minute {
+		t.Errorf("files token lifetime = %v", ttl)
+	}
+
+	list := func(tok, path string) (int, string) {
+		status, _, body := agentCall(t, "GET", ft.BaseURL+"/list?path="+url.QueryEscape(path), tok, testOrigin, nil)
+		return status, body
+	}
+	upload := func(tok, name string, content []byte) (int, string) {
+		status, _, body := agentCall(t, "PUT", ft.BaseURL+"/upload?name="+url.QueryEscape(name), tok, testOrigin, bytes.NewReader(content))
+		return status, body
+	}
+	download := func(tok, path string) (int, http.Header, string) {
+		return agentCall(t, "GET", ft.BaseURL+"/download?path="+url.QueryEscape(path)+"&token="+url.QueryEscape(tok), "", "", nil)
+	}
+
+	// ---- upload, list, download
+	content := bytes.Repeat([]byte("zynthera "), 5000)
+	if status, body := upload(ft.Token, "notes.txt", content); status != 201 || !strings.Contains(body, `"name":"notes.txt"`) {
+		t.Fatalf("upload: %d %s", status, body)
+	}
+	if status, body := list(ft.Token, "Uploads"); status != 200 || !strings.Contains(body, `"name":"notes.txt"`) {
+		t.Fatalf("list: %d %s", status, body)
+	}
+	status, header, body := download(ft.Token, "Uploads/notes.txt")
+	if status != 200 || body != string(content) {
+		t.Fatalf("download: %d, %d bytes", status, len(body))
+	}
+	if cd := header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment") {
+		t.Errorf("download is not an attachment: %q", cd)
+	}
+	// The file really is in that PC's storage on the host, and nowhere else.
+	if _, err := os.Stat(filepath.Join(v.drv.FilesDir(id), "Uploads", "notes.txt")); err != nil {
+		t.Errorf("uploaded file not in the pc's home: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(v.drv.FilesDir(otherID), "Uploads", "notes.txt")); err == nil {
+		t.Error("uploaded file appeared in another user's pc")
+	}
+
+	// ---- the token is reusable until it expires (unlike a stream token)
+	if status, _ := list(ft.Token, ""); status != 200 {
+		t.Errorf("second use of the files token: %d", status)
+	}
+
+	// ---- traversal attempts through the whole chain
+	secret := filepath.Join(filepath.Dir(v.drv.FilesDir(id)), "host-secret.txt")
+	if err := os.WriteFile(secret, []byte("HOST SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, attempt := range []string{"../host-secret.txt", "../../host-secret.txt", "Uploads/../../host-secret.txt",
+		"../" + otherID + "/Uploads", secret, "..%2Fhost-secret.txt", "....//host-secret.txt"} {
+		status, _, body := download(ft.Token, attempt)
+		if status == 200 || strings.Contains(body, "HOST SECRET") {
+			t.Errorf("download %q: %d %s", attempt, status, body)
+		}
+		if _, body := list(ft.Token, attempt); strings.Contains(body, "host-secret") || strings.Contains(body, "HOST SECRET") {
+			t.Errorf("list %q leaked: %s", attempt, body)
+		}
+	}
+	if status, body := upload(ft.Token, "../../escaped.txt", []byte("x")); status != 201 || !strings.Contains(body, `"name":"escaped.txt"`) {
+		t.Errorf("upload with a path as name: %d %s", status, body)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(v.drv.FilesDir(id)), "escaped.txt")); err == nil {
+		t.Fatal("an upload escaped the pc's home directory")
+	}
+
+	// ---- an upload over the limit is refused and leaves nothing behind
+	big := make([]byte, testMaxUploadBytes+1)
+	if status, body := upload(ft.Token, "big.bin", big); status != 413 {
+		t.Errorf("upload over the limit: %d %s", status, body)
+	}
+	if _, body := list(ft.Token, "Uploads"); strings.Contains(body, "big.bin") || strings.Contains(body, ".upload-") {
+		t.Errorf("a refused upload left a file behind: %s", body)
+	}
+
+	// ---- who may call
+	st := v.streamToken(b, id)
+	if status, _ := list(st.Token, ""); status != 401 {
+		t.Errorf("stream token used for files: %d", status)
+	}
+	if status, _ := list("garbage", ""); status != 401 {
+		t.Errorf("garbage token: %d", status)
+	}
+	if status, _, _ := agentCall(t, "GET", ft.BaseURL+"/list?path=", ft.Token, "https://evil.example", nil); status != 403 {
+		t.Errorf("list from another origin: %d", status)
+	}
+	if status, _, _ := agentCall(t, "PUT", ft.BaseURL+"/upload?name=x.txt", ft.Token, "https://evil.example", strings.NewReader("x")); status != 403 {
+		t.Errorf("upload from another origin: %d", status)
+	}
+	// One user's token never reaches another user's PC: the VM id is inside
+	// the signed token, not in the URL.
+	otherToken := v.filesToken(other, otherID)
+	if _, body := list(otherToken.Token, "Uploads"); strings.Contains(body, "notes.txt") {
+		t.Error("another user's token listed this pc's files")
+	}
+
+	// ---- CORS preflight, as a browser sends it before the real request
+	status, header, _ = agentCall(t, "OPTIONS", ft.BaseURL+"/upload?name=x", "", testOrigin, nil)
+	if status != 204 || header.Get("Access-Control-Allow-Origin") != testOrigin ||
+		!strings.Contains(header.Get("Access-Control-Allow-Headers"), "Authorization") ||
+		!strings.Contains(header.Get("Access-Control-Allow-Methods"), "PUT") {
+		t.Errorf("preflight: %d %v", status, header)
+	}
+
+	// ---- no file access to a PC that is not running
+	v.act(b, id, "suspend", 202)
+	v.waitState(b, id, "suspended")
+	if status, body := list(ft.Token, ""); status != 409 {
+		t.Errorf("list on a suspended pc: %d %s", status, body)
+	}
+	if res := b.post("/api/vms/"+id+"/files-token", nil); res.Status != 409 {
+		t.Errorf("files token for a suspended pc: %d", res.Status)
 	}
 }

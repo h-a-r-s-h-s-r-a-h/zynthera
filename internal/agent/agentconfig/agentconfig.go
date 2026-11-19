@@ -32,6 +32,8 @@ type Config struct {
 	MockFail    []string
 
 	HeartbeatSeconds int
+	// MaxUploadMB is the largest file a browser may upload into a VM.
+	MaxUploadMB int
 }
 
 // IsProduction reports whether the agent runs on a real host for real users.
@@ -69,6 +71,7 @@ func Load() (Config, error) {
 		MockVNCAddr: l.String("ZYN_MOCK_VNC_ADDR", "127.0.0.1:5901"),
 
 		HeartbeatSeconds: l.Int("ZYN_HEARTBEAT_SECONDS", 10),
+		MaxUploadMB:      l.Int("ZYN_MAX_UPLOAD_MB", 2048),
 	}
 
 	for _, op := range strings.Split(l.String("ZYN_MOCK_FAIL", ""), ",") {

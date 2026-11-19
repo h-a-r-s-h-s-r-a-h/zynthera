@@ -458,3 +458,19 @@ func (s *server) handleStreamToken(w http.ResponseWriter, r *http.Request) {
 		"url": streamURL(host.PublicUrl), "token": tok, "expires_at": expires.UTC(),
 	})
 }
+
+// POST /api/vms/:id/files-token -> { base_url, token, expires_at }
+//
+// Unlike a stream token, a files token can be used many times until it
+// expires; the browser asks for a new one when it does.
+func (s *server) handleFilesToken(w http.ResponseWriter, r *http.Request) {
+	tok, expires, host, ok := s.issueAgentToken(w, r, token.PurposeFiles, s.Config.FilesTokenTTLSeconds)
+	if !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"base_url": strings.TrimRight(host.PublicUrl, "/") + "/files", "token": tok, "expires_at": expires.UTC(),
+		"max_upload_mb": s.Config.MaxUploadMB,
+	})
+}

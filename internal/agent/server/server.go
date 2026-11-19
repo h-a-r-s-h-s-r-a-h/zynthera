@@ -36,6 +36,8 @@ type Deps struct {
 	Driver driver.Driver
 	// Stream serves GET /stream for browsers. Nil leaves the route out.
 	Stream http.Handler
+	// Files serves the /files/ routes for browsers. Nil leaves them out.
+	Files http.Handler
 	// OnVMStopped is called after an operation that stops a VM succeeded,
 	// so open desktop streams can be closed. Nil means nothing to do.
 	OnVMStopped func(vmID string)
@@ -103,6 +105,9 @@ func NewRouter(d Deps) http.Handler {
 	// carries the token.
 	if d.Stream != nil {
 		r.Get("/stream", d.Stream.ServeHTTP)
+	}
+	if d.Files != nil {
+		r.Handle("/files/*", d.Files)
 	}
 
 	// Everything below is for the control plane only.
