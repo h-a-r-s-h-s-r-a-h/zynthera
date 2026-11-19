@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS usage_intervals;
+DROP TABLE IF EXISTS snapshots;
+DROP TABLE IF EXISTS vm_events;
+DROP TABLE IF EXISTS vms;
+DROP TABLE IF EXISTS os_images;

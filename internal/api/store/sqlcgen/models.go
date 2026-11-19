@@ -42,6 +42,19 @@ type Host struct {
 	CreatedAt       time.Time
 }
 
+type OsImage struct {
+	ID             uuid.UUID
+	Slug           string
+	DisplayName    string
+	Description    string
+	CurrentVersion string
+	MinRamMb       int32
+	MinDiskGb      int32
+	Enabled        bool
+	SortOrder      int32
+	CreatedAt      time.Time
+}
+
 type Session struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID
@@ -51,6 +64,26 @@ type Session struct {
 	Ip         *netip.Addr
 	UserAgent  pgtype.Text
 	CreatedAt  time.Time
+}
+
+type Snapshot struct {
+	ID        uuid.UUID
+	VmID      uuid.UUID
+	Name      string
+	Status    string
+	SizeBytes int64
+	CreatedAt time.Time
+}
+
+type UsageInterval struct {
+	ID        int64
+	VmID      uuid.UUID
+	UserID    uuid.UUID
+	HostID    uuid.UUID
+	RamMb     int32
+	Vcpus     int32
+	StartedAt time.Time
+	EndedAt   *time.Time
 }
 
 type User struct {
@@ -66,4 +99,38 @@ type User struct {
 	MaxDiskGb       pgtype.Int4
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type Vm struct {
+	ID                  uuid.UUID
+	UserID              uuid.UUID
+	HostID              uuid.UUID
+	OsImageID           uuid.UUID
+	ImageVersion        string
+	Name                string
+	RamMb               int32
+	Vcpus               int32
+	DiskGb              int32
+	LinuxUsername       string
+	PendingPasswordHash pgtype.Text
+	State               string
+	StateChangedAt      time.Time
+	StateDetail         pgtype.Text
+	HasSavedState       bool
+	ViewerConnected     bool
+	LastActiveAt        *time.Time
+	KeepAliveUntil      *time.Time
+	DiskUsedBytes       int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	DeletedAt           *time.Time
+}
+
+type VmEvent struct {
+	ID        int64
+	VmID      uuid.UUID
+	Type      string
+	Actor     string
+	Message   string
+	CreatedAt time.Time
 }

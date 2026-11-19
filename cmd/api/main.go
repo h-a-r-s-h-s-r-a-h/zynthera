@@ -194,6 +194,11 @@ func seed(ctx context.Context, log *slog.Logger, cfg appconfig.Config) error {
 	}
 	log.Info("seed: admin user ready", "email", admin.Email)
 
+	if err := seedImages(ctx, q); err != nil {
+		return err
+	}
+	log.Info("seed: OS images ready", "count", len(seedOSImages))
+
 	if cfg.IsProduction() {
 		return nil
 	}
@@ -236,5 +241,34 @@ func seedDevHost(ctx context.Context, log *slog.Logger, cfg appconfig.Config, q 
 		return fmt.Errorf("seed development host: %w", err)
 	}
 	log.Info("seed: development host ready", "name", host.Name, "agent_url", host.AgentUrl)
+	return nil
+}
+
+// seedOSImages are the V1 images (spec section 13). Only Ubuntu is enabled
+// until the others have been built.
+var seedOSImages = []sqlcgen.UpsertOSImageParams{
+	{
+		Slug: "ubuntu-24.04-xfce", DisplayName: "Ubuntu 24.04", CurrentVersion: "2026.11.1",
+		Description: "Ubuntu 24.04 LTS with the XFCE desktop. The best-supported choice.",
+		MinRamMb:    2048, MinDiskGb: 40, Enabled: true, SortOrder: 10,
+	},
+	{
+		Slug: "debian-12-xfce", DisplayName: "Debian 12", CurrentVersion: "2026.11.1",
+		Description: "Debian 12 with the XFCE desktop.",
+		MinRamMb:    2048, MinDiskGb: 40, Enabled: false, SortOrder: 20,
+	},
+	{
+		Slug: "fedora-xfce", DisplayName: "Fedora", CurrentVersion: "2026.11.1",
+		Description: "Fedora with the XFCE desktop.",
+		MinRamMb:    2048, MinDiskGb: 40, Enabled: false, SortOrder: 30,
+	},
+}
+
+func seedImages(ctx context.Context, q *sqlcgen.Queries) error {
+	for _, img := range seedOSImages {
+		if err := q.UpsertOSImage(ctx, img); err != nil {
+			return fmt.Errorf("seed image %s: %w", img.Slug, err)
+		}
+	}
 	return nil
 }
