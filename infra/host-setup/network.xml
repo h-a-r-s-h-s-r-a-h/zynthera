@@ -1,0 +1,13 @@
+<!-- The private network every Zynthera VM attaches to.
+     VMs get a fixed address from the agent (a static DHCP entry per VM),
+     reach the internet through NAT, and cannot be reached from outside. -->
+<network>
+  <name>zynthera</name>
+  <forward mode='nat'/>
+  <bridge name='zynbr0' stp='on' delay='0'/>
+  <ip address='10.210.0.1' netmask='255.255.0.0'>
+    <dhcp>
+      <range start='10.210.0.10' end='10.210.255.250'/>
+    </dhcp>
+  </ip>
+</network>

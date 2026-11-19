@@ -293,7 +293,7 @@ func (s *Storage) HostDisk(_ context.Context) (totalGB, freeGB int, err error) {
 	if err := syscall.Statfs(s.dataDir, &st); err != nil {
 		return 0, 0, fmt.Errorf("qcow2: statfs: %w", err)
 	}
-	block := int64(st.Bsize)
+	block := st.Bsize
 	total := int64(st.Blocks) * block //nolint:gosec // block counts of a real filesystem fit in int64
 	free := int64(st.Bavail) * block  //nolint:gosec // as above
 	return int(total / gib), int(free / gib), nil

@@ -16,9 +16,13 @@ import (
 
 	"zynthera/internal/agent/agentconfig"
 	"zynthera/internal/agent/driver"
+	"zynthera/internal/agent/driver/libvirt"
 	"zynthera/internal/agent/driver/mock"
 	"zynthera/internal/agent/heartbeat"
+	"zynthera/internal/agent/netalloc"
+	agentrun "zynthera/internal/agent/run"
 	"zynthera/internal/agent/server"
+	"zynthera/internal/agent/storage/qcow2"
 	"zynthera/internal/agent/stream"
 	"zynthera/internal/shared/config"
 	"zynthera/internal/shared/httpx"
@@ -89,8 +93,31 @@ func newDriver(cfg agentconfig.Config) (driver.Driver, error) {
 			Delays:  mock.RealisticDelays,
 			Images:  mock.DefaultImages,
 		})
+	case "libvirt":
+		if cfg.StorageDriver != "qcow2" {
+			return nil, fmt.Errorf("ZYN_STORAGE_DRIVER=%s is not available yet: the ZFS driver arrives in milestone 7", cfg.StorageDriver)
+		}
+		store, err := qcow2.New(cfg.DataDir, agentrun.Exec{})
+		if err != nil {
+			return nil, err
+		}
+		// The DHCP range of the zynthera network (infra/host-setup/network.xml).
+		alloc, err := netalloc.New(cfg.DataDir, "10.210.0.10", "10.210.255.250")
+		if err != nil {
+			return nil, err
+		}
+		return libvirt.New(libvirt.Options{
+			URI:         cfg.LibvirtURI,
+			Network:     cfg.LibvirtNetwork,
+			CPUMode:     cfg.VMCPUMode,
+			BandwidthKB: cfg.VMBandwidthKB,
+			BridgePort:  cfg.FileBridgePort,
+			Store:       store,
+			Alloc:       alloc,
+			Runner:      agentrun.Exec{},
+		})
 	default:
-		return nil, fmt.Errorf("ZYN_VM_DRIVER=%s is not available yet: the libvirt driver arrives in milestone 5", cfg.VMDriver)
+		return nil, fmt.Errorf("unknown ZYN_VM_DRIVER %q", cfg.VMDriver)
 	}
 }
 
