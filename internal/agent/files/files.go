@@ -146,7 +146,10 @@ func bearer(r *http.Request) string {
 // forward sends one request to the bridge and streams the answer back. The
 // body is never held in memory.
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, method, target, bridgeToken string, body io.Reader, contentLength int64, passHeaders ...string) {
-	req, err := http.NewRequestWithContext(r.Context(), method, target, body)
+	// The target's host comes from the agent's own record of the VM (its
+	// reserved address), never from the request. Only the path's query
+	// values come from the browser, and the bridge confines those.
+	req, err := http.NewRequestWithContext(r.Context(), method, target, body) //nolint:gosec // G704: see comment above
 	if err != nil {
 		httpx.Internal(w)
 		return
@@ -160,7 +163,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, method, target, 
 		req.Header.Set("Range", rng)
 	}
 
-	res, err := p.client.Do(req)
+	res, err := p.client.Do(req) //nolint:gosec // G704: see the comment where the request is built
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		switch {
