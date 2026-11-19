@@ -1,0 +1,30 @@
+# The Zynthera host agent. It runs as root because it manages disks, network
+# reservations and libvirt. That is why it listens on loopback only (Caddy is
+# in front of it) and accepts exactly two kinds of caller.
+[Unit]
+Description=Zynthera host agent
+Documentation=https://github.com/zynthera/zynthera/blob/main/docs/DEPLOY_HOST.md
+After=network-online.target libvirtd.service zynthera-firewall.service
+Wants=network-online.target
+Requires=libvirtd.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/zynthera/agent.env
+WorkingDirectory=/var/lib/zynthera
+ExecStart=/usr/local/bin/zynthera-agent
+Restart=on-failure
+RestartSec=3
+# Stopping the agent never stops VMs: they belong to libvirt.
+KillMode=process
+LimitNOFILE=65536
+
+# Hardening that does not get in the way of virsh and qemu-img.
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

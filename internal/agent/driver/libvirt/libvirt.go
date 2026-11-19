@@ -578,14 +578,39 @@ func (d *Driver) Display(ctx context.Context, id string) (vmtypes.DisplayEndpoin
 	return vmtypes.DisplayEndpoint{Network: "tcp", Address: addr}, nil
 }
 
-// SyncClock implements driver.Driver. It needs the guest agent, which may
-// not have started yet right after a resume; the caller retries.
+// SyncClock implements driver.Driver. After a resume the guest clock is
+// behind by the time the VM spent asleep.
+//
+// The normal way is the guest agent's set-time command (`virsh domtime`).
+// That command needs the hwclock program inside the guest, which some
+// distributions no longer install by default (Ubuntu 24.04 moved it to the
+// util-linux-extra package). So if it fails, the driver runs `date` inside
+// the guest through the agent's exec command and sets the clock to the
+// host's time. (Asking chrony to step the clock does not help at this
+// point: chrony only learns that the clock jumped at its next poll.)
+//
+// Both ways need the guest agent, which may not answer yet right after a
+// resume; the caller retries.
 func (d *Driver) SyncClock(ctx context.Context, id string) error {
 	if _, err := d.knownState(ctx, id); err != nil {
 		return err
 	}
-	if _, err := d.virsh(ctx, "domtime", domainxml.Name(id), "--now"); err != nil {
-		return fmt.Errorf("libvirt: domtime: %w", err)
+	name := domainxml.Name(id)
+	_, domtimeErr := d.virsh(ctx, "domtime", name, "--now")
+	if domtimeErr == nil {
+		return nil
+	}
+	now := time.Now()
+	stamp := fmt.Sprintf("@%d.%09d", now.Unix(), now.Nanosecond())
+	cmd, err := json.Marshal(map[string]any{
+		"execute":   "guest-exec",
+		"arguments": map[string]any{"path": "/bin/date", "arg": []string{"-u", "-s", stamp}},
+	})
+	if err != nil {
+		return fmt.Errorf("libvirt: encode agent command: %w", err)
+	}
+	if _, err := d.virsh(ctx, "qemu-agent-command", name, string(cmd)); err != nil {
+		return fmt.Errorf("libvirt: sync clock: domtime failed (%w) and setting the date failed (%w)", domtimeErr, err)
 	}
 	return nil
 }

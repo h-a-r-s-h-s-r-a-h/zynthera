@@ -47,5 +47,13 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=true
 DESK
 
+# --- the cloud-init seed disc stays attached for the life of the PC (a saved
+# session can only be restored into the same virtual hardware). Keep it out
+# of the file manager and off the desktop.
+cat > /etc/udev/rules.d/90-zynthera-hide-seed.rules <<'UDEV'
+SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="cidata", ENV{UDISKS_IGNORE}="1"
+SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="CIDATA", ENV{UDISKS_IGNORE}="1"
+UDEV
+
 # --- no SSH server listening: the only ways in are the web desktop and files
 systemctl disable ssh.service ssh.socket 2>/dev/null || true

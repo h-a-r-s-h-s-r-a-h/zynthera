@@ -13,6 +13,19 @@ apt-get purge -y 'linux-image-*-kvm' 'linux-modules-*-kvm' linux-kvm linux-image
 apt-get purge -y linux-virtual linux-image-virtual linux-headers-virtual 2>/dev/null || true
 
 # qemu-guest-agent: clean shutdown and clock sync after a resume.
+# util-linux-extra: provides hwclock, which the guest agent needs for its
+#   set-time command. Ubuntu 24.04 no longer installs it by default; without
+#   it "virsh domtime" answers "not currently supported".
 # chrony: the second line of defence for the clock.
-apt-get install -y qemu-guest-agent chrony cloud-init cloud-guest-utils
+apt-get install -y qemu-guest-agent util-linux-extra chrony cloud-init cloud-guest-utils
 systemctl enable qemu-guest-agent.service chrony.service
+
+# A PC that was suspended for hours wakes up with a clock that is hours
+# behind. chrony's default only steps the clock during its first three
+# updates after start and slews afterwards, which would take days. Let it
+# step whenever the clock is off by more than a second.
+if grep -q '^makestep' /etc/chrony/chrony.conf; then
+  sed -i 's/^makestep.*/makestep 1 -1/' /etc/chrony/chrony.conf
+else
+  echo 'makestep 1 -1' >> /etc/chrony/chrony.conf
+fi

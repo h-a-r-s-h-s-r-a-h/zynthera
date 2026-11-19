@@ -1,0 +1,53 @@
+#!/usr/sbin/nft -f
+# Zynthera host firewall (spec section 12.7).
+#
+# Everything lives in its own table, so loading this file never touches
+# libvirt's NAT rules or any other firewall on the host. The two lines below
+# make loading it twice safe: the table is created if missing, then deleted,
+# then defined from scratch.
+#
+# A "drop" in any nftables chain is final, so these rules hold even if
+# another table would accept the same packet.
+
+table inet zynthera
+delete table inet zynthera
+
+table inet zynthera {
+    # Packets from a VM to the host itself.
+    chain input {
+        type filter hook input priority -10; policy accept;
+
+        iifname != "zynbr0" return
+
+        # Replies to connections the host opened (the agent reaching a VM's
+        # file bridge).
+        ct state established,related accept
+
+        # DHCP and DNS from the network's own dnsmasq. Nothing else: VMs must
+        # not reach the agent, SSH or any other service on the host.
+        udp dport 67 accept
+        ip daddr 10.210.0.1 udp dport 53 accept
+        ip daddr 10.210.0.1 tcp dport 53 accept
+        drop
+    }
+
+    # Packets from a VM to anywhere else.
+    chain forward {
+        type filter hook forward priority -10; policy accept;
+
+        iifname != "zynbr0" return
+
+        # No guest IPv6 in V1.
+        meta nfproto ipv6 drop
+
+        # VMs must not send mail directly: this is how a platform gets its
+        # addresses blacklisted.
+        tcp dport 25 drop
+
+        # No access to private and link-local ranges: the hosting provider's
+        # internal network, cloud metadata services, and other VMs.
+        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } drop
+
+        # Everything else is allowed: users need the internet to install software.
+    }
+}

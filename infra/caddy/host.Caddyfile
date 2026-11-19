@@ -1,0 +1,61 @@
+# Caddy on a separate VM host: TLS in front of the agent.
+#
+# Use this when VM hosts are separate machines from the control plane.
+# (A single server that runs everything uses single-server.Caddyfile.)
+#
+# Browsers connect here for the desktop stream (WebSocket) and for file
+# transfer; the control plane calls the same address for VM operations.
+# Replace __ZYN_HOST_DOMAIN__ with the host's name, e.g. host-1.example.com,
+# and __ZYN_CONTROL_PLANE_IP__ with the control plane's address.
+
+__ZYN_HOST_DOMAIN__ {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# ---- for browsers: desktop stream and file transfer
+	@browser path /stream /files/* /health
+	handle @browser {
+		# The agent enforces the upload limit itself while a file streams through.
+		request_body {
+			max_size 0
+		}
+		reverse_proxy 127.0.0.1:9090 {
+			flush_interval -1
+			transport http {
+				response_header_timeout 20m
+			}
+		}
+	}
+
+	# ---- everything else is the control plane's API to the agent. It needs
+	# the agent token anyway; limiting it to the control plane's address is a
+	# second lock.
+	handle {
+		@notControlPlane not remote_ip __ZYN_CONTROL_PLANE_IP__
+		respond @notControlPlane "Not found" 404
+		reverse_proxy 127.0.0.1:9090 {
+			transport http {
+				response_header_timeout 20m
+			}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/zynthera-host.log {
+			roll_size 50MiB
+			roll_keep 10
+		}
+		# Tokens travel in the query string of /stream and /files/download.
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete token
+				}
+			}
+		}
+	}
+}

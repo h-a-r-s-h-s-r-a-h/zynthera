@@ -1,0 +1,89 @@
+# Production control plane: Postgres, Redis, the API and the web app.
+# Started by scripts/install.sh; settings come from /etc/zynthera/control-plane.env.
+#
+#   docker compose --env-file /etc/zynthera/control-plane.env -f infra/docker-compose.prod.yml up -d
+#
+# Nothing here is reachable from the internet directly. Every published port
+# is bound to 127.0.0.1, and Caddy on the host is the only public entrance.
+name: zynthera
+
+services:
+  postgres:
+    image: postgres:18.7-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8.8.4-alpine
+    restart: unless-stopped
+    # Append-only persistence, so queued jobs survive a restart.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Applies database migrations, then exits. The API waits for it.
+  migrate:
+    image: zynthera-api:${ZYN_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: infra/docker/go.Dockerfile
+      target: api
+    command: ["migrate", "up"]
+    env_file: ${ZYN_ENV_FILE:-/etc/zynthera/control-plane.env}
+    # Host networking: the API talks to Postgres and Redis on loopback, and
+    # to the agent on this server, which only listens on loopback.
+    network_mode: host
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: zynthera-api:${ZYN_VERSION:-latest}
+    command: ["serve"]
+    env_file: ${ZYN_ENV_FILE:-/etc/zynthera/control-plane.env}
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://$${ZYN_API_ADDR}/health"]
+      interval: 10s
+      timeout: 4s
+      retries: 6
+      start_period: 10s
+
+  web:
+    image: zynthera-web:${ZYN_VERSION:-latest}
+    build:
+      context: ../web
+      dockerfile: ../infra/docker/web.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ZYN_WEB_PORT:-3000}:3000"
+
+volumes:
+  pgdata:
+  redisdata:

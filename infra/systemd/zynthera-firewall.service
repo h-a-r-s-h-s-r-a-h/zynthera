@@ -1,0 +1,17 @@
+# Loads the Zynthera firewall table at boot. It is a unit of its own, instead
+# of an entry in /etc/nftables.conf, because that file starts with "flush
+# ruleset" on Debian and Ubuntu and would wipe the rules libvirt installs.
+[Unit]
+Description=Zynthera VM firewall rules
+After=network-pre.target libvirtd.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/zynthera/firewall.nft
+ExecReload=/usr/sbin/nft -f /etc/zynthera/firewall.nft
+ExecStop=/usr/sbin/nft delete table inet zynthera
+
+[Install]
+WantedBy=multi-user.target

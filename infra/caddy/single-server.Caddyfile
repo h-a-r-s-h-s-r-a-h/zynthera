@@ -1,0 +1,75 @@
+# Caddy for a single server that runs everything: the web app, the API and
+# the VM host agent, all behind one domain and one certificate.
+#
+# Because the browser reaches the agent on the same origin as the web app,
+# no second DNS name is needed.
+#
+# Installed by scripts/install.sh as /etc/caddy/Caddyfile, with the two
+# placeholders filled in.
+
+{
+	email __ZYN_ACME_EMAIL__
+}
+
+__ZYN_DOMAIN__ {
+	# ---- security headers for the web app
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The page may only talk to its own origin (API, desktop stream over
+		# wss, file transfer) and may not be framed by anyone.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' wss://__ZYN_DOMAIN__; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# ---- agent endpoints for browsers: desktop stream and file transfer
+	@agent path /stream /files/*
+	handle @agent {
+		# The agent enforces the upload limit itself while a file streams through.
+		request_body {
+			max_size 0
+		}
+		reverse_proxy 127.0.0.1:9090 {
+			flush_interval -1
+			transport http {
+				response_header_timeout 20m
+			}
+		}
+	}
+
+	# ---- agents report to the API on loopback, never through the public address
+	handle /internal/* {
+		respond "Not found" 404
+	}
+
+	# ---- the API
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8080 {
+			# Server-Sent Events (/api/events) must not be buffered.
+			flush_interval -1
+		}
+	}
+
+	# ---- everything else is the web app
+	handle {
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	log {
+		output file /var/log/caddy/zynthera.log {
+			roll_size 50MiB
+			roll_keep 10
+		}
+		# Tokens travel in the query string of /stream and /files/download.
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					delete token
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,9 @@
+.git
+.env
+.data
+bin
+web
+docs
+images
+scripts
+**/node_modules
