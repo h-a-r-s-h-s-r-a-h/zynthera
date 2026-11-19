@@ -1,0 +1,31 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+  exclusions:
+    paths:
+      - internal/api/store/sqlcgen
+      - web
+    rules:
+      # Tests may ignore errors from helpers and use fixed fake secrets.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - internal/api/store/sqlcgen
+      - web

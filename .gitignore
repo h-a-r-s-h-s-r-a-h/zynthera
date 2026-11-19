@@ -1,0 +1,10 @@
+.env
+bin/
+.data/
+node_modules/
+.next/
+*.tsbuildinfo
+web/test-results/
+web/playwright-report/
+coverage/
+.DS_Store
