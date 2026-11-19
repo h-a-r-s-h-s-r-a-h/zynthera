@@ -10,6 +10,7 @@ The operating system does not run inside the browser. It runs as a KVM virtual m
 
 ## Table of contents
 
+0. [Quick start](#quick-start)
 1. [What you can do with it](#what-you-can-do-with-it)
 2. [How it works](#how-it-works)
 3. [Tech stack](#tech-stack)
@@ -32,6 +33,54 @@ The operating system does not run inside the browser. It runs as a KVM virtual m
 20. [Documentation](#documentation)
 21. [Author](#author)
 22. [License](#license)
+
+---
+
+## Quick start
+
+For a machine that already has the tools installed (Docker, Go, Node.js, libvirt, Packer). If something is missing, follow the [full setup](#local-setup-step-by-step) instead.
+
+**Once, after cloning:**
+
+```bash
+cp .env.example .env
+(cd web && npm install)
+mkdir -p /var/tmp/zynthera-dev && chmod 711 /var/tmp/zynthera-dev
+sg libvirt -c "virsh -c qemu:///system net-define infra/host-setup/network.xml"
+```
+
+In `.env`, set `ZYN_VM_DRIVER=libvirt` and `ZYN_DATA_DIR=/var/tmp/zynthera-dev`.
+
+**Then run these five steps in order:**
+
+```bash
+# 1. Start the VM network
+sg libvirt -c "virsh -c qemu:///system net-start zynthera"
+
+# 2. Start the database, queue and mail catcher (Docker)
+make up
+
+# 3. Create the tables, the admin account and the host record
+make migrate
+make seed
+
+# 4. Build the Ubuntu image (about 25 minutes, only the first time)
+ZYN_IMAGES_DIR=/var/tmp/zynthera-dev/images images/build.sh ubuntu-24.04-xfce 2026.11.2
+
+# 5. Start the API, the agent and the web app (Ctrl+C stops it)
+sg libvirt -c "make dev"
+```
+
+Open **http://localhost:3000**. Admin login: `admin@zynthera.local` / `dev-only-admin-password`. Emails arrive at http://localhost:8025.
+
+| When | Which steps |
+|---|---|
+| First time | 1, 2, 3, 4, 5 |
+| Every time after that | 1, 2, 5 |
+| After deleting the database (`make nuke`) | add step 3 again |
+| After deleting the image | add step 4 again |
+
+`sg libvirt -c "..."` is only needed until you have logged out and back in once after joining the `libvirt` group. After that, run the command inside the quotes directly.
 
 ---
 
