@@ -156,8 +156,11 @@ func BuildSeed(ctx context.Context, runner run.Runner, dir string, p Params) (st
 	if _, err := runner.Output(ctx, "cloud-localds", iso, userPath, metaPath); err != nil {
 		return "", fmt.Errorf("cloudinit: build seed: %w", err)
 	}
-	// QEMU runs as another user and only needs to read it.
-	if err := os.Chmod(iso, 0o644); err != nil { //nolint:gosec // see comment; the seed holds a hash, never a plain password
+	// The seed holds the password hash and the file bridge token, so only
+	// its owner may read it. QEMU runs as another user and still can: when
+	// the VM starts, libvirt hands every disk of the domain (this one too)
+	// to that user, and takes it back afterwards.
+	if err := os.Chmod(iso, 0o600); err != nil {
 		return "", fmt.Errorf("cloudinit: chmod seed: %w", err)
 	}
 	return iso, nil

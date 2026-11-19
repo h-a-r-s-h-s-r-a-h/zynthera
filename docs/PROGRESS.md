@@ -20,21 +20,21 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 
 ### Next steps, in order
 
-1. Rebuild the Ubuntu image as version `2026.11.2` (`images/build.sh`), then set
-   `os_images.current_version`. The scripts already contain three fixes found by testing:
-   `util-linux-extra` (guest agent can set the clock), `makestep 1 -1` for chrony, and a udev
-   rule that hides the cloud-init seed disc from the desktop. Ubuntu's archive was not
-   answering from this network when this was written, which is why it was not rebuilt.
+1. (Done.) The Ubuntu image was rebuilt as `2026.11.2` with three fixes found by testing:
+   `util-linux-extra` (the guest agent can set the clock), `makestep 1 -1` for chrony, and a
+   udev rule that hides the cloud-init seed disc. Verified on a real PC. New installs seed
+   `2026.11.2` as the current version.
 2. Run `scripts/install.sh` on a fresh Ubuntu 24.04 server and fix whatever the first real
    run turns up. Then tick D.2, D.4, D.5 and M5.1.
 3. M5.11 `scripts/acceptance.sh`, including the isolation checks of acceptance step 10.
-4. The rest of milestone 7, starting with M7.9 (security review against spec section 16).
+4. The open points in `docs/SECURITY_REVIEW.md`, then the rest of milestone 7 (backups first).
 
 ### This machine's local setup
 
 `.env` is currently set to the real driver: `ZYN_VM_DRIVER=libvirt` and
 `ZYN_DATA_DIR=/var/tmp/zynthera-dev` (QEMU cannot reach files under a home directory). The
-image is at `/var/tmp/zynthera-dev/images/ubuntu-24.04-xfce/2026.11.1.qcow2`.
+images are in `/var/tmp/zynthera-dev/images/ubuntu-24.04-xfce/` (`2026.11.2` is current;
+`2026.11.1` can be deleted, no PC uses it).
 
 - Until the user has logged out and in once, start with `sg libvirt -c "make dev"`.
 - For mock mode (needed by `make test-e2e` as written, and on machines without KVM) set
@@ -389,7 +389,7 @@ Goal: something that can be run for real users.
 - [ ] **M7.6** Production packaging: Dockerfiles for the API and the web app, a production Compose file, `infra/caddy/control-plane.Caddyfile`, `docs/DEPLOY_CONTROL_PLANE.md`.
 - [ ] **M7.7** Backups, in `docs/OPERATIONS.md` with scripts: a nightly `pg_dump`, and VM disk backups of suspended and stopped VMs to S3-compatible storage with a tested restore procedure. The storage bucket comes from the user, so keep it configurable.
 - [ ] **M7.8** Metrics endpoints in Prometheus format on the API and the agent: job counts and durations, VMs by state, host capacity, open streams.
-- [ ] **M7.9** Review the code against every item in section 16. Fix what you find and write the result to `docs/SECURITY_REVIEW.md`.
+- [x] **M7.9** Review the code against every item in section 16. Fix what you find and write the result to `docs/SECURITY_REVIEW.md`.
 - [ ] **M7.10** Load test script: create, suspend and resume many VMs in parallel. Record timings and failures.
 - [x] **M7.11** Account deletion: a user can delete their account, which deletes their VMs and data.
 
