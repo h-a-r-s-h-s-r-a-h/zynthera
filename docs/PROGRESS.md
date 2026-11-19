@@ -8,10 +8,22 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
   the mock driver).
 - **Also done:** Milestone 3 (VM lifecycle in the control plane) and Milestone 4 (desktop in
   the browser). The whole product flow works in mock mode.
-- **Next:** Milestone 5 (real virtual machines on KVM). Before starting it, the machine needs
-  one logout/login so the `libvirt` group membership is active (`virsh list --all` must work
-  without sudo). Order: M5.2 netalloc, M5.3 qcow2 storage, M5.4 cloud-init, M5.5 domain XML,
-  M5.6/M5.7 libvirt driver, M5.1 host setup scripts, M5.8 Ubuntu image.
+- **In progress:** Milestone 5 (real VMs) and Milestone 6 (files and snapshots), worked on
+  together.
+  - Done and tested on this machine's KVM: netalloc, qcow2 storage, cloud-init seed, domain
+    XML, the libvirt driver (it passes the driver conformance suite against real VMs), the
+    `zynthera` libvirt network.
+  - Done and tested in mock mode: file bridge, files-token, agent file proxy, upload/download
+    panel in the viewer, snapshots and resize on the settings page.
+  - Running: the first build of the Ubuntu image (`images/build.sh ubuntu-24.04-xfce 2026.11.1`
+    into `/var/tmp/zynthera-dev/images`).
+- **Next:** when the image exists: boot it by hand, then run the product with
+  `ZYN_VM_DRIVER=libvirt` and `ZYN_DATA_DIR=/var/tmp/zynthera-dev`, run the conformance suite
+  with `ZYN_TEST_LIBVIRT_IMAGE`, measure timings (M5.12), write the host setup scripts
+  (M5.1), systemd unit and Caddyfile (M5.9), `scripts/acceptance.sh` (M5.11).
+- **How to reach libvirt in this session:** the user is in the `libvirt` group but this login
+  session predates that, so commands are run as `sg libvirt -c "..."`. After a logout/login
+  plain `virsh` works.
 
 ## Environment check (M0.1, 2026-11-19)
 
@@ -135,6 +147,31 @@ The seeded admin is `admin@zynthera.local` with the password from `ZYN_SEED_ADMI
 - `resizeSession` (the PC changes its resolution to fit the window) works with the mock
   desktop's VNC server. Whether QEMU's display supports it is to be checked in milestone 5.
 
+## Verified so far in milestones 5 and 6
+
+- `sg libvirt -c "ZYN_TEST_LIBVIRT=1 go test ./internal/agent/driver/libvirt"`: the
+  conformance suite passes against real KVM domains (start, managed save, resume, force stop,
+  reboot, resize, internal snapshots, delete), using a blank disk image. The clean-shutdown
+  check is skipped until a bootable image exists.
+- `TestDeleteLeavesNothingBehind`: after delete, no VM directory, no libvirt domain, no
+  DHCP entry, no address reservation, no saved memory image; while suspended there is no
+  QEMU process.
+- Finding (spec 12.5 asked): with QEMU 8.2.2, `qemu-img resize` works on a disk that has
+  internal snapshots, so resize does not require deleting snapshots first.
+- Finding: libvirt changes the owner of a golden image file once a VM cloned from it has
+  run. The image stays readable. In production the agent runs as root, so this has no effect.
+- File transfer in mock mode, API to agent to bridge: upload, list, download, seven
+  traversal attempts, upload over the limit, wrong token purpose, wrong origin, another
+  user's token, CORS preflight, refused when the PC is not running.
+- Browser tests (7 in total now): upload twice (no overwrite), browse, download and compare
+  content; snapshot of a running PC, restore after shutdown, resize.
+- Two more bugs found by browser tests and fixed: the history and snapshot lists did not
+  refresh after an operation that ends in the state it started in, and the live update
+  after a resize carried the old size.
+- Not yet verified on a real VM: cloud-init applying the seed, the desktop over QEMU's VNC,
+  the file bridge inside a guest, the guest agent (clean shutdown, clock sync), network
+  isolation. All of these need the image.
+
 ## Deployment milestone (added to the spec, see docs/DECISIONS.md D-001)
 
 Goal: a fresh Ubuntu server becomes a working Zynthera with one command.
@@ -245,12 +282,12 @@ Goal: the complete user journey works in mock mode.
 Goal: the same journey on real KVM VMs, with real suspend and resume. Needs a KVM host. Without one, write and unit-test everything, mark the host-dependent tasks "written, not tested on real hardware", and tell the user exactly which commands to run on a server.
 
 - [ ] **M5.1** `infra/host-setup/`: idempotent scripts for packages, directories, the network, the firewall, `libvirt-guests` and `qemu.conf`. `docs/DEPLOY_HOST.md`.
-- [ ] **M5.2** `internal/agent/netalloc`: MAC and IP reservation under a lock, with tests.
-- [ ] **M5.3** qcow2 storage driver, tested with the real `qemu-img` when it is installed.
-- [ ] **M5.4** `internal/agent/cloudinit`: rendering and seed building, with golden-file tests.
-- [ ] **M5.5** `internal/agent/domainxml`: the builder, golden files, and `virt-xml-validate` in tests when available.
-- [ ] **M5.6** libvirt driver: create, start, suspend, shutdown, force stop, reboot, discard, delete, status, list, display, clock sync, capacity, images.
-- [ ] **M5.7** libvirt driver: resize and snapshots.
+- [x] **M5.2** `internal/agent/netalloc`: MAC and IP reservation under a lock, with tests.
+- [x] **M5.3** qcow2 storage driver, tested with the real `qemu-img` when it is installed.
+- [x] **M5.4** `internal/agent/cloudinit`: rendering and seed building, with golden-file tests.
+- [x] **M5.5** `internal/agent/domainxml`: the builder, golden files, and `virt-xml-validate` in tests when available.
+- [x] **M5.6** libvirt driver: create, start, suspend, shutdown, force stop, reboot, discard, delete, status, list, display, clock sync, capacity, images.
+- [x] **M5.7** libvirt driver: resize and snapshots.
 - [ ] **M5.8** The Ubuntu image: Packer template, scripts, `images/build.sh`. Build it and boot it by hand with `virsh` before wiring it in.
 - [ ] **M5.9** `infra/systemd/zynthera-agent.service` and `infra/caddy/host.Caddyfile`.
 - [ ] **M5.10** Run the conformance suite with `ZYN_TEST_LIBVIRT=1`.
@@ -263,13 +300,13 @@ Goal: the same journey on real KVM VMs, with real suspend and resume. Needs a KV
 
 Goal: users can move files in and out, and manage snapshots from the UI.
 
-- [ ] **M6.1** `cmd/file-bridge` and `internal/bridge`, with the path safety tests from section 14.
+- [x] **M6.1** `cmd/file-bridge` and `internal/bridge`, with the path safety tests from section 14.
 - [ ] **M6.2** Bake the bridge into the image (binary and unit file) and wire it through cloud-init. Rebuild the image as a new version.
-- [ ] **M6.3** `POST /api/vms/:id/files-token`.
-- [ ] **M6.4** Agent file proxy: list, upload, download, CORS, size limit, streaming. The mock driver's equivalent against a temp directory.
-- [ ] **M6.5** Web: upload button, drag-and-drop, progress and errors; the download panel.
-- [ ] **M6.6** Web: snapshots, resize and "discard saved session" in the settings page.
-- [ ] **M6.7** Tests: traversal attempts through the whole chain, an upload over the limit, and an end-to-end upload and download in mock mode.
+- [x] **M6.3** `POST /api/vms/:id/files-token`.
+- [x] **M6.4** Agent file proxy: list, upload, download, CORS, size limit, streaming. The mock driver's equivalent against a temp directory.
+- [x] **M6.5** Web: upload button, drag-and-drop, progress and errors; the download panel.
+- [x] **M6.6** Web: snapshots, resize and "discard saved session" in the settings page.
+- [x] **M6.7** Tests: traversal attempts through the whole chain, an upload over the limit, and an end-to-end upload and download in mock mode.
 
 **Done when:** steps 8 and 9 of section 19 pass.
 

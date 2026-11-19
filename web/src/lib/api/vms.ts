@@ -4,13 +4,18 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import { useEffect } from "react";
 import { applyVMUpdate } from "../vm-state";
 import { api } from "./client";
-import type { CreateVMInput, Options, OSImage, StreamToken, VM, VMEvent } from "./types";
+import type { CreateVMInput, Options, OSImage, Snapshot, StreamToken, VM, VMEvent } from "./types";
 
 export const vmsKey = ["vms"] as const;
 
 /** Puts one changed PC into the cached list. Used by mutations and the event stream. */
 export function putVM(queryClient: QueryClient, vm: VM): void {
   queryClient.setQueryData<VM[]>(vmsKey, (list) => applyVMUpdate(list ?? [], vm));
+  // Every change of a PC may have added history or changed its snapshots.
+  // (Keying those lists on the PC's state is not enough: a resize goes from
+  // "shut down" back to "shut down".)
+  void queryClient.invalidateQueries({ queryKey: ["vm-events", vm.id] });
+  void queryClient.invalidateQueries({ queryKey: ["snapshots", vm.id] });
 }
 
 /** The user's PCs. Kept current by the event stream, so it never refetches on a timer. */
@@ -136,10 +141,10 @@ export function usePatchVM(id: string) {
   });
 }
 
-export function useVMHistory(id: string, refreshKey: string) {
+export function useVMHistory(id: string) {
   return useQuery({
-    // The history changes whenever the PC's state does.
-    queryKey: ["vm-events", id, refreshKey],
+    // Refreshed by putVM whenever the PC changes.
+    queryKey: ["vm-events", id],
     queryFn: async ({ signal }) =>
       (await api<{ events: VMEvent[] }>(`/vms/${id}/events`, { signal })).events,
     placeholderData: (previous) => previous,
@@ -149,4 +154,37 @@ export function useVMHistory(id: string, refreshKey: string) {
 /** A fresh single-use token for the desktop stream. Never cached. */
 export function fetchStreamToken(id: string, signal?: AbortSignal): Promise<StreamToken> {
   return api<StreamToken>(`/vms/${id}/stream-token`, { method: "POST", body: {}, signal });
+}
+
+export function useSnapshots(id: string) {
+  return useQuery({
+    // Refreshed by putVM whenever the PC changes.
+    queryKey: ["snapshots", id],
+    queryFn: async ({ signal }) =>
+      (await api<{ snapshots: Snapshot[] }>(`/vms/${id}/snapshots`, { signal })).snapshots,
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useCreateSnapshot(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      api<{ snapshot: Snapshot }>(`/vms/${id}/snapshots`, { method: "POST", body: { name } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["snapshots", id] }),
+  });
+}
+
+export function useSnapshotAction(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ snapshotId, action }: { snapshotId: string; action: "restore" | "delete" }) =>
+      action === "restore"
+        ? api<{ vm: VM }>(`/vms/${id}/snapshots/${snapshotId}/restore`, {
+            method: "POST",
+            body: {},
+          })
+        : api<{ vm: VM }>(`/vms/${id}/snapshots/${snapshotId}`, { method: "DELETE" }),
+    onSuccess: (res) => putVM(queryClient, res.vm),
+  });
 }

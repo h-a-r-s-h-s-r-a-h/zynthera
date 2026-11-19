@@ -119,6 +119,8 @@ export function formatRAM(mb: number): string {
 }
 
 export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} KB`;
   if (bytes < 1024 ** 3) return `${Math.round(bytes / 1024 ** 2)} MB`;
   const gb = bytes / 1024 ** 3;
   return `${gb >= 10 ? Math.round(gb) : Math.round(gb * 10) / 10} GB`;

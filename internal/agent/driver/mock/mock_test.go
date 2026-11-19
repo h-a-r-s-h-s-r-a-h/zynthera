@@ -2,6 +2,7 @@ package mock
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -125,5 +126,18 @@ func TestSpecValidation(t *testing.T) {
 		if s.Validate() == "" {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// The development default data directory is relative. Everything that hands
+// out paths must still give absolute ones.
+func TestRelativeDataDirBecomesAbsolute(t *testing.T) {
+	t.Chdir(t.TempDir())
+	d, err := New(Options{DataDir: "./data/agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir := d.FilesDir("11111111-1111-4111-8111-111111111111"); !filepath.IsAbs(dir) {
+		t.Fatalf("FilesDir is relative: %s", dir)
 	}
 }

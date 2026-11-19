@@ -7,9 +7,12 @@ import { Button, ButtonLink, Card, Choice, Field, Notice, PageLoading } from "@/
 import { StateBadge } from "@/components/vm/state-badge";
 import type { VM } from "@/lib/api/types";
 import {
+  useCreateSnapshot,
   useDeleteVM,
   useOptions,
   usePatchVM,
+  useSnapshotAction,
+  useSnapshots,
   useVM,
   useVMAction,
   useVMHistory,
@@ -143,8 +146,211 @@ function SavedSession({ vm }: { vm: VM }) {
   );
 }
 
+function Snapshots({ vm }: { vm: VM }) {
+  const options = useOptions();
+  const snapshots = useSnapshots(vm.id);
+  const create = useCreateSnapshot(vm.id);
+  const act = useSnapshotAction(vm.id);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+
+  const max = options.data?.max_snapshots_per_vm ?? 5;
+  const list = snapshots.data ?? [];
+  const canCreate = vm.allowed_actions.includes("snapshot");
+  const canRestore = vm.allowed_actions.includes("restore_snapshot");
+  const canDelete = vm.allowed_actions.includes("delete_snapshot");
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed.length < 1 || trimmed.length > 60) {
+      setError("Give the snapshot a name of 1 to 60 characters.");
+      return;
+    }
+    setError("");
+    create.mutate(trimmed, {
+      onSuccess: () => setName(""),
+      onError: (err) => setError(err.message),
+    });
+  }
+
+  return (
+    <Section title="Snapshots">
+      <p className="text-sm text-text-muted">
+        A snapshot remembers the whole disk at one moment, so you can go back to it later. You can
+        keep up to {max}. Taking one while the PC is running pauses it for a moment. Shutting down
+        first gives the cleanest snapshot.
+      </p>
+      {snapshots.isError && <Notice tone="danger">{snapshots.error.message}</Notice>}
+      {act.isError && <Notice tone="danger">{act.error.message}</Notice>}
+
+      {list.length > 0 && (
+        <ul className="flex flex-col divide-y divide-border text-sm" aria-label="Snapshots">
+          {list.map((snap) => (
+            <li key={snap.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate font-medium">{snap.name}</p>
+                <p className="text-xs text-text-muted">
+                  {snap.status === "creating"
+                    ? "Being taken…"
+                    : snap.status === "error"
+                      ? "Failed"
+                      : dateTime.format(new Date(snap.created_at))}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  disabled={!canRestore || snap.status !== "ready" || act.isPending}
+                  onClick={() => {
+                    const ok = window.confirm(
+                      `Restore "${snap.name}"? The current session ends, and everything changed since this snapshot is lost.`,
+                    );
+                    if (ok) act.mutate({ snapshotId: snap.id, action: "restore" });
+                  }}
+                >
+                  Restore
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={!canDelete || snap.status === "creating" || act.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Delete the snapshot "${snap.name}"?`))
+                      act.mutate({ snapshotId: snap.id, action: "delete" });
+                  }}
+                >
+                  Delete
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {list.length > 0 && !canRestore && vm.state === "running" && (
+        <p className="text-sm text-text-muted">
+          Suspend or shut down the PC to restore or delete a snapshot.
+        </p>
+      )}
+
+      <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="flex-1">
+          <Field
+            id="snapshot-name"
+            label="New snapshot"
+            placeholder="Before the big update"
+            value={name}
+            maxLength={60}
+            onChange={(e) => setName(e.target.value)}
+            error={error}
+          />
+        </div>
+        <Button
+          type="submit"
+          variant="secondary"
+          busy={create.isPending}
+          disabled={!canCreate || list.length >= max}
+        >
+          Take snapshot
+        </Button>
+      </form>
+      {list.length >= max && (
+        <p className="text-sm text-text-muted">Delete a snapshot to make room for a new one.</p>
+      )}
+    </Section>
+  );
+}
+
+function Resize({ vm }: { vm: VM }) {
+  const options = useOptions();
+  const patch = usePatchVM(vm.id);
+  const [ram, setRam] = useState(vm.ram_mb);
+  const [vcpus, setVcpus] = useState(vm.vcpus);
+  const [disk, setDisk] = useState(vm.disk_gb);
+
+  const allowed = vm.allowed_actions.includes("resize");
+  const changed = ram !== vm.ram_mb || vcpus !== vm.vcpus || disk !== vm.disk_gb;
+  const why =
+    vm.state === "suspended" || vm.has_saved_state
+      ? "This PC has a saved session, and memory or CPU cannot change underneath it. Shut the PC down (or discard the saved session) first."
+      : vm.state === "running"
+        ? "Shut the PC down first. Its size can only change while it is off."
+        : "The size can only change while the PC is shut down.";
+
+  if (!options.data) return null;
+  const o = options.data;
+  // What this PC may grow to: the account's limit minus what other PCs use.
+  const room = {
+    ram: o.limits.max_ram_mb - o.usage.ram_mb + vm.ram_mb,
+    vcpus: o.limits.max_vcpus - o.usage.vcpus + vm.vcpus,
+    disk: o.limits.max_disk_gb - o.usage.disk_gb + vm.disk_gb,
+  };
+
+  return (
+    <Section title="Size">
+      {!allowed && <Notice>{why}</Notice>}
+      {patch.isError && <Notice tone="danger">{patch.error.message}</Notice>}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">Memory</span>
+          <div role="radiogroup" aria-label="Memory" className="flex flex-wrap gap-2">
+            {o.allowed_ram_mb.map((v) => (
+              <Choice
+                key={v}
+                selected={ram === v}
+                disabled={!allowed || v > room.ram}
+                title={formatRAM(v)}
+                onSelect={() => setRam(v)}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">CPU cores</span>
+          <div role="radiogroup" aria-label="CPU cores" className="flex flex-wrap gap-2">
+            {o.allowed_vcpus.map((v) => (
+              <Choice
+                key={v}
+                selected={vcpus === v}
+                disabled={!allowed || v > room.vcpus}
+                title={String(v)}
+                onSelect={() => setVcpus(v)}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">Disk</span>
+          <div role="radiogroup" aria-label="Disk" className="flex flex-wrap gap-2">
+            {o.allowed_disk_gb.map((v) => (
+              <Choice
+                key={v}
+                selected={disk === v}
+                // A disk can grow but never shrink.
+                disabled={!allowed || v > room.disk || v < vm.disk_gb}
+                title={`${v} GB`}
+                onSelect={() => setDisk(v)}
+              />
+            ))}
+          </div>
+          <p className="text-xs text-text-muted">A disk can grow but not shrink.</p>
+        </div>
+      </div>
+      <div>
+        <Button
+          variant="secondary"
+          busy={patch.isPending}
+          disabled={!allowed || !changed}
+          onClick={() => patch.mutate({ ram_mb: ram, vcpus, disk_gb: disk })}
+        >
+          Change size
+        </Button>
+      </div>
+    </Section>
+  );
+}
+
 function History({ vm }: { vm: VM }) {
-  const history = useVMHistory(vm.id, vm.state);
+  const history = useVMHistory(vm.id);
   return (
     <Section title="History">
       {history.isError ? (
@@ -257,6 +463,9 @@ function Settings() {
       <Rename key={`rename-${vm.id}`} vm={vm} />
       <KeepAlive vm={vm} />
       <SavedSession vm={vm} />
+      <Snapshots vm={vm} />
+      {/* key: forget unsaved choices once the size really changed */}
+      <Resize key={`resize-${vm.id}-${vm.ram_mb}-${vm.vcpus}-${vm.disk_gb}`} vm={vm} />
       <History vm={vm} />
       <DeleteVM key={`delete-${vm.id}`} vm={vm} />
     </>

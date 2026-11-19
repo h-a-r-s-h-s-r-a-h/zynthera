@@ -87,6 +87,13 @@ func New(opts Options) (*Driver, error) {
 	if opts.DataDir == "" {
 		return nil, errors.New("mock: DataDir is required")
 	}
+	// Absolute, because the stand-in file bridges need an absolute home
+	// directory (the development default is the relative ./.data/agent).
+	abs, err := filepath.Abs(opts.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("mock: data dir: %w", err)
+	}
+	opts.DataDir = abs
 	if err := os.MkdirAll(opts.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("mock: create data dir: %w", err)
 	}

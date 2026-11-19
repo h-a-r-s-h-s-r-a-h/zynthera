@@ -1,7 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { emailedLink, resetRateLimits, uniqueEmail } from "./helpers";
+import { deleteAllPCs, emailedLink, resetRateLimits, uniqueEmail } from "./helpers";
 
 test.beforeEach(() => resetRateLimits());
+// page.request shares the page's login cookie.
+test.afterEach(async ({ page }) => deleteAllPCs(page.request));
 
 const viewer = (page: Page) => page.getByTestId("desktop-viewer");
 

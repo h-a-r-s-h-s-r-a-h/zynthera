@@ -413,6 +413,13 @@ func (s *Service) Settle(ctx context.Context, vmID uuid.UUID, expected, next vms
 		if err := opts.Extra(ctx, q); err != nil {
 			return sqlcgen.Vm{}, false, err
 		}
+		// Extra may have changed the row (a resize writes the new size).
+		// Read it again, so what is returned and published is what was
+		// actually committed.
+		vm, err = q.GetVM(ctx, vmID)
+		if err != nil {
+			return sqlcgen.Vm{}, false, fmt.Errorf("reload vm: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return sqlcgen.Vm{}, false, fmt.Errorf("commit: %w", err)

@@ -201,3 +201,38 @@ The header is wrapped in `<Suspense>` because it reads the current path, which b
 prerendering of dynamic routes otherwise. Components that depend on who is logged in render
 a neutral state until hydration is finished (`useHydrated`), which avoids hydration errors
 when the login check finishes before a late part of the page hydrates.
+
+## D-035 Mock VMs have real file bridges
+
+In mock mode the agent runs the real file bridge code in-process, one per mock VM, on a
+loopback port, each confined to that VM's directory under the data directory. The agent's
+file proxy talks HTTP to it exactly as it would to a bridge inside a guest, so the whole
+file path is exercised without KVM.
+
+## D-036 File bridge paths behave like a chroot
+
+A path is re-rooted at the home directory before it is resolved: `../..` from the top stays
+at the top, and `/etc/passwd` means `~/etc/passwd`. After resolving symlinks the result must
+still be inside the home directory, or the request is refused.
+
+## D-037 The agent reads `ZYN_MAX_UPLOAD_MB` too
+
+Spec 8.2 lists it under the API, but the agent is what enforces it while a file streams
+through (spec 11.8). In development both read the same `.env`; on a real host the value goes
+into `agent.env` as well.
+
+## D-038 Resize rewrites the domain definition
+
+Instead of `virsh setmaxmem` / `setvcpus`, the driver rebuilds the domain XML from the VM's
+metadata with the new sizes and defines it again. One code path builds every definition, so
+a resized VM cannot drift from a freshly created one.
+
+## D-039 Firefox comes from Mozilla's APT repository in the image
+
+Ubuntu's own `firefox` package is a snap, which starts slowly in a VM.
+
+## D-040 The build user is removed by a one-shot unit at shutdown
+
+Packer logs in over SSH as a temporary user. That user cannot delete itself while logged in,
+so the sealing script installs a unit that removes it at the very end of the shutdown, along
+with the unit itself. SSH is disabled and masked in the finished image.

@@ -69,3 +69,51 @@ export async function emailedLink(
     .toBe(true);
   return link;
 }
+
+/** Creates a verified account through the API and returns its credentials. */
+export async function verifiedAccount(
+  request: APIRequestContext,
+  prefix: string,
+): Promise<{ email: string; password: string }> {
+  const email = uniqueEmail(prefix);
+  const password = "a-good-password";
+  const headers = { Origin: "http://localhost:3000" };
+  await request.post("/api/auth/signup", { data: { email, password }, headers });
+  const link = await emailedLink(request, email, "/verify-email");
+  const token = new URL(link).searchParams.get("token");
+  const res = await request.post("/api/auth/verify-email", { data: { token }, headers });
+  expect(res.status()).toBe(200);
+  return { email, password };
+}
+
+/**
+ * Deletes every PC of the logged-in user and waits until they are gone.
+ * Each test calls it at the end: PCs left behind would fill the mock host's
+ * disk allowance and make later runs fail with "no capacity".
+ */
+export async function deleteAllPCs(request: APIRequestContext): Promise<void> {
+  const headers = { Origin: "http://localhost:3000" };
+  const list = await request.get("/api/vms");
+  if (!list.ok()) return; // not logged in: nothing to clean up
+  const { vms } = (await list.json()) as { vms: { id: string }[] };
+  for (const vm of vms) {
+    await expect
+      .poll(
+        async () => {
+          const res = await request.delete(`/api/vms/${vm.id}`, { headers });
+          // 409 means a job is still working on the PC: try again shortly.
+          return res.status() === 202 || res.status() === 404;
+        },
+        { timeout: 60_000, message: `could not delete pc ${vm.id}` },
+      )
+      .toBe(true);
+  }
+  await expect
+    .poll(
+      async () => ((await (await request.get("/api/vms")).json()) as { vms: unknown[] }).vms.length,
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBe(0);
+}

@@ -145,6 +145,8 @@ describe("formatting", () => {
     expect(formatBytes(9.44 * 1024 ** 3)).toBe("9.4 GB");
     expect(formatBytes(45.6 * 1024 ** 3)).toBe("46 GB");
     expect(formatBytes(512 * 1024 ** 2)).toBe("512 MB");
+    expect(formatBytes(2048)).toBe("2 KB");
+    expect(formatBytes(300)).toBe("300 B");
   });
 
   it("summarises disk use", () => {

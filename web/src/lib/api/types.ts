@@ -128,3 +128,19 @@ export interface CreateVMInput {
   linux_username: string;
   linux_password: string;
 }
+
+/** internal/api/httpapi/hosts.go: handleFilesToken */
+export interface FilesToken {
+  base_url: string;
+  token: string;
+  expires_at: string;
+  max_upload_mb: number;
+}
+
+/** internal/bridge/bridge.go: Entry */
+export interface FileEntry {
+  name: string;
+  type: "file" | "dir";
+  size: number;
+  modified: string;
+}

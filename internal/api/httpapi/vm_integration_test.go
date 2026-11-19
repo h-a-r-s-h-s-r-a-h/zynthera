@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 
 	"zynthera/internal/agent/agentconfig"
@@ -27,6 +28,7 @@ import (
 	"zynthera/internal/agent/heartbeat"
 	agentserver "zynthera/internal/agent/server"
 	"zynthera/internal/agent/stream"
+	"zynthera/internal/api/events"
 	"zynthera/internal/api/jobs"
 	"zynthera/internal/api/vmsvc"
 	"zynthera/internal/bridge"
@@ -1350,5 +1352,49 @@ func TestFileTransferEndToEnd(t *testing.T) {
 	}
 	if res := b.post("/api/vms/"+id+"/files-token", nil); res.Status != 409 {
 		t.Errorf("files token for a suspended pc: %d", res.Status)
+	}
+}
+
+// The live update sent after a job must describe the VM as it was committed,
+// including changes the job made in the same transaction.
+func TestLiveUpdateAfterResizeCarriesTheNewSize(t *testing.T) {
+	v := newVMApp(t)
+	b := v.verifiedUser("alex@example.com")
+	id := v.createVM(b, "My PC").ID.String()
+	v.act(b, id, "force-stop", 202)
+	v.waitState(b, id, "stopped")
+
+	var userID uuid.UUID
+	if err := v.pool.QueryRow(context.Background(), `SELECT user_id FROM vms WHERE id = $1`, id).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	updates, stop, err := events.NewBus(v.rdb).Subscribe(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+
+	if res := b.do("PATCH", "/api/vms/"+id, map[string]any{"ram_mb": 4096, "disk_gb": 80}); res.Status != 202 {
+		t.Fatalf("resize: %d %s", res.Status, res.Raw)
+	}
+	for {
+		select {
+		case raw := <-updates:
+			var vm vmsvc.VMJSON
+			if err := json.Unmarshal(raw, &vm); err != nil {
+				t.Fatal(err)
+			}
+			if vm.State != "stopped" {
+				continue // still "maintenance"
+			}
+			if vm.RAMMB != 4096 || vm.DiskGB != 80 {
+				t.Fatalf("the final update carries the old size: %d MB, %d GB", vm.RAMMB, vm.DiskGB)
+			}
+			return
+		case <-ctx.Done():
+			t.Fatal("no final update arrived")
+		}
 	}
 }

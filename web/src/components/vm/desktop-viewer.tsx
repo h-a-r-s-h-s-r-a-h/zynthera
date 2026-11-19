@@ -6,6 +6,7 @@ import type { VM } from "@/lib/api/types";
 import { useOptions, useVMAction, type SimpleAction } from "@/lib/api/vms";
 import { keepAliveActive, reconnectDelay, viewerPhase } from "@/lib/vm-state";
 import { Button, ButtonLink, Notice } from "../ui";
+import { FilesPanel, useUploads } from "./files-panel";
 import { VncSession, type StreamEnd, type VncHandle } from "./vnc-session";
 
 /** State of the stream to a running PC. */
@@ -57,6 +58,9 @@ export function DesktopViewer({ vm }: { vm: VM }) {
   // touch screens, where nothing can hover).
   const [toolbarPinned, setToolbarPinned] = useState(false);
   const [clipboardOpen, setClipboardOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const uploads = useUploads(vm.id);
   const [clipboard, setClipboard] = useState("");
   const [idleLeft, setIdleLeft] = useState<number | null>(null);
 
@@ -325,6 +329,23 @@ export function DesktopViewer({ vm }: { vm: VM }) {
       onPointerDownCapture={noteInput}
       onKeyDownCapture={noteInput}
       onWheelCapture={noteInput}
+      onDragEnter={(event) => {
+        if (showToolbar && event.dataTransfer.types.includes("Files")) setDropping(true);
+      }}
+      onDragOver={(event) => {
+        // Without this the browser would open the dropped file instead.
+        if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget === event.target) setDropping(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDropping(false);
+        if (!showToolbar || event.dataTransfer.files.length === 0) return;
+        uploads.add(event.dataTransfer.files);
+        setFilesOpen(true);
+      }}
     >
       {body}
 
@@ -358,6 +379,16 @@ export function DesktopViewer({ vm }: { vm: VM }) {
                 onClick={() => setClipboardOpen((v) => !v)}
               >
                 Clipboard
+              </Button>
+              <Button
+                variant="ghost"
+                aria-expanded={filesOpen}
+                onClick={() => {
+                  setClipboardOpen(false);
+                  setFilesOpen((v) => !v);
+                }}
+              >
+                Files{uploads.active ? " (uploading…)" : ""}
               </Button>
               <Button
                 variant="ghost"
@@ -417,6 +448,18 @@ export function DesktopViewer({ vm }: { vm: VM }) {
               Send to PC
             </Button>
           </div>
+        </div>
+      )}
+
+      {showToolbar && filesOpen && (
+        <FilesPanel vmId={vm.id} uploads={uploads} onClose={() => setFilesOpen(false)} />
+      )}
+
+      {showToolbar && dropping && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-bg/80">
+          <p className="rounded-card border border-accent bg-surface px-6 py-4 text-lg font-medium">
+            Drop to upload to your PC
+          </p>
         </div>
       )}
 
