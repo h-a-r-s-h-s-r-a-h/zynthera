@@ -4,8 +4,18 @@ package storage
 
 import (
 	"context"
+	"errors"
 
 	"zynthera/internal/shared/vmtypes"
+)
+
+// Errors every storage driver uses.
+var (
+	// ErrNotFound means the disk, image or snapshot does not exist.
+	ErrNotFound = errors.New("storage: not found")
+	// ErrInvalid means the request cannot be carried out, for example
+	// shrinking a disk.
+	ErrInvalid = errors.New("storage: invalid request")
 )
 
 // DiskRef tells the domain XML builder what kind of disk a VM has.

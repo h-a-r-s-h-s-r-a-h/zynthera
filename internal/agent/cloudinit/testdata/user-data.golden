@@ -1,0 +1,40 @@
+#cloud-config
+hostname: zynthera-6f1c0b
+manage_etc_hosts: true
+ssh_pwauth: false
+users:
+    - name: alex
+      gecos: alex
+      shell: /bin/bash
+      groups: [sudo, adm, audio, video, plugdev]
+      sudo: ALL=(ALL:ALL) ALL
+      lock_passwd: false
+      passwd: $6$zyntheratestsalt$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./abcdefghijklmnopqrstuv
+growpart:
+    mode: auto
+    devices: [/]
+write_files:
+    - path: /etc/zynthera/file-bridge.env
+      permissions: "0600"
+      content: |
+        ZYN_BRIDGE_TOKEN=bridge-token-0123456789abcdefghijklmnopqrstuv
+        ZYN_BRIDGE_PORT=7070
+    - path: /etc/systemd/system/zynthera-file-bridge.service.d/10-user.conf
+      content: |
+        [Service]
+        User=alex
+    - path: /etc/lightdm/lightdm.conf.d/50-zynthera-autologin.conf
+      content: |
+        [Seat:*]
+        autologin-user=alex
+        autologin-user-timeout=0
+runcmd:
+    - - systemctl
+      - daemon-reload
+    - - systemctl
+      - enable
+      - --now
+      - zynthera-file-bridge.service
+    - - systemctl
+      - restart
+      - lightdm.service
