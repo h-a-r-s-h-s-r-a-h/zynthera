@@ -3,7 +3,7 @@
 # in front of it) and accepts exactly two kinds of caller.
 [Unit]
 Description=Zynthera host agent
-Documentation=https://github.com/zynthera/zynthera/blob/main/docs/DEPLOY_HOST.md
+Documentation=https://github.com/h-a-r-s-h-s-r-a-h/zynthera/blob/main/docs/DEPLOY_HOST.md
 After=network-online.target libvirtd.service zynthera-firewall.service
 Wants=network-online.target
 Requires=libvirtd.service
