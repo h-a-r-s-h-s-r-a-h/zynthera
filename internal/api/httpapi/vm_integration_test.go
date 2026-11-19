@@ -2,9 +2,12 @@ package httpapi
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,12 +15,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/hibiken/asynq"
 
 	"zynthera/internal/agent/agentconfig"
 	"zynthera/internal/agent/driver/mock"
 	"zynthera/internal/agent/heartbeat"
 	agentserver "zynthera/internal/agent/server"
+	"zynthera/internal/agent/stream"
 	"zynthera/internal/api/jobs"
 	"zynthera/internal/api/vmsvc"
 	"zynthera/internal/shared/logging"
@@ -31,6 +36,8 @@ type vmApp struct {
 	drv    *mock.Driver
 	sender *heartbeat.Sender
 	hostID string
+	// agentToken lets tests call the internal agent endpoints as the host.
+	agentToken string
 }
 
 func newVMApp(t *testing.T) *vmApp {
@@ -43,22 +50,56 @@ func newVMApp(t *testing.T) *vmApp {
 	t.Cleanup(agentSrv.Close)
 	created := app.createHost(admin, "local", agentSrv.URL)
 
+	// A stand-in for the VM's display: greets like a VNC server, then echoes.
+	vnc, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = vnc.Close() })
+	go func() {
+		for {
+			c, err := vnc.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				_, _ = c.Write([]byte("RFB 003.008\n"))
+				_, _ = io.Copy(c, c)
+			}()
+		}
+	}()
+
 	drv, err := mock.New(mock.Options{
-		DataDir: t.TempDir(), VNCAddr: "127.0.0.1:5901",
+		DataDir: t.TempDir(), VNCAddr: vnc.Addr().String(),
 		Images: []vmtypes.ImageRef{{Slug: "ubuntu-24.04-xfce", Version: "2026.11.1"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	log := logging.NewTo(io.Discard, "test-agent")
+	hostID := created.Host.ID.String()
+	// Stream events are delivered inline so tests can rely on their order.
+	notify := func(vmID, event string) {
+		raw, _ := json.Marshal(vmtypes.StreamEvent{HostID: hostID, VMID: vmID, Event: event})
+		req, _ := http.NewRequest("POST", app.srv.URL+"/internal/agent/stream-event", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+created.AgentToken)
+		if res, err := http.DefaultClient.Do(req); err == nil {
+			res.Body.Close()
+		}
+	}
+	proxy := stream.New([]byte(created.StreamSecret), testOrigin, drv, log, notify)
 	agentHandler = agentserver.NewRouter(agentserver.Deps{
 		Config: agentconfig.Config{VMDriver: "mock", Token: created.AgentToken}, Logger: log, Driver: drv,
+		Stream: proxy, OnVMStopped: proxy.CloseVM,
 	})
 	sender := &heartbeat.Sender{
-		HostID: created.Host.ID.String(), Version: agentserver.Version, APIURL: app.srv.URL,
+		HostID: hostID, Version: agentserver.Version, APIURL: app.srv.URL,
 		Token: created.AgentToken, Interval: time.Second, Driver: drv, Logger: log,
+		ViewerConnected: proxy.ViewerConnected,
 	}
-	v := &vmApp{testApp: app, admin: admin, drv: drv, sender: sender, hostID: created.Host.ID.String()}
+	v := &vmApp{testApp: app, admin: admin, drv: drv, sender: sender, hostID: hostID, agentToken: created.AgentToken}
 	v.beat()
 
 	_, err = app.pool.Exec(context.Background(),
@@ -857,7 +898,7 @@ func TestEventStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", v.srv.URL+"/api/events", nil)
-	res, err := b.client.Do(req) //nolint:bodyclose // closed by the defer below; the linter loses track because a goroutine reads the body
+	res, err := b.client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -940,5 +981,178 @@ func TestEventStream(t *testing.T) {
 	// Logged out: no stream.
 	if res := v.newBrowser().get("/api/events"); res.Status != 401 {
 		t.Errorf("events without login: %d", res.Status)
+	}
+}
+
+type streamTokenJSON struct {
+	URL       string    `json:"url"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (v *vmApp) streamToken(b *browser, id string) streamTokenJSON {
+	v.t.Helper()
+	res := b.post("/api/vms/"+id+"/stream-token", nil)
+	if res.Status != 200 {
+		v.t.Fatalf("stream token: %d %s", res.Status, res.Raw)
+	}
+	if res.Header.Get("Cache-Control") != "no-store" {
+		v.t.Error("stream token response may be cached")
+	}
+	var out streamTokenJSON
+	if err := json.Unmarshal([]byte(res.Raw), &out); err != nil {
+		v.t.Fatal(err)
+	}
+	return out
+}
+
+func (v *vmApp) dialStream(st streamTokenJSON) *websocket.Conn {
+	v.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, st.URL+"?token="+st.Token, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": {testOrigin}}, Subprotocols: []string{"binary"},
+	})
+	if err != nil {
+		v.t.Fatalf("dial stream: %v", err)
+	}
+	v.t.Cleanup(func() { _ = conn.CloseNow() })
+	return conn
+}
+
+func wsCloseCode(t *testing.T, conn *websocket.Conn) websocket.StatusCode {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		_, _, err := conn.Read(ctx)
+		if err == nil {
+			continue
+		}
+		var ce websocket.CloseError
+		if errors.As(err, &ce) {
+			return ce.Code
+		}
+		t.Fatalf("stream ended without a close code: %v", err)
+	}
+}
+
+// From the API's token to bytes of the VM's display, through the agent.
+func TestDesktopStreamEndToEnd(t *testing.T) {
+	v := newVMApp(t)
+	b := v.verifiedUser("alex@example.com")
+	other := v.verifiedUser("other@example.com")
+	id := v.createVM(b, "My PC").ID.String()
+
+	// Only the owner gets a token, and only for a running PC.
+	if res := other.post("/api/vms/"+id+"/stream-token", nil); res.Status != 404 {
+		t.Fatalf("another user's stream token: %d %s", res.Status, res.Raw)
+	}
+	if res := v.newBrowser().post("/api/vms/"+id+"/stream-token", nil); res.Status != 401 && res.Status != 403 {
+		t.Fatalf("stream token without login: %d", res.Status)
+	}
+
+	st := v.streamToken(b, id)
+	if !strings.HasPrefix(st.URL, "ws://127.0.0.1:") || !strings.HasSuffix(st.URL, "/stream") {
+		t.Errorf("stream url = %q", st.URL)
+	}
+	if ttl := time.Until(st.ExpiresAt); ttl <= 0 || ttl > 61*time.Second {
+		t.Errorf("token lifetime = %v", ttl)
+	}
+
+	conn := v.dialStream(st)
+	ctx := context.Background()
+	_, greeting, err := conn.Read(ctx)
+	if err != nil || string(greeting) != "RFB 003.008\n" {
+		t.Fatalf("greeting = %q, %v", greeting, err)
+	}
+	if err := conn.Write(ctx, websocket.MessageBinary, []byte("key press")); err != nil {
+		t.Fatal(err)
+	}
+	if _, echo, err := conn.Read(ctx); err != nil || string(echo) != "key press" {
+		t.Fatalf("echo = %q, %v", echo, err)
+	}
+
+	// The control plane knows a viewer is attached.
+	vm := v.getVM(b, id)
+	if !vm.ViewerConnected {
+		t.Fatal("viewer_connected is false while the stream is open")
+	}
+
+	// A PC with a viewer is never suspended for being idle, however long
+	// ago its last recorded activity was.
+	if _, err := v.pool.Exec(ctx, `UPDATE vms SET last_active_at = now() - interval '2 hours' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	v.runCron(jobs.TypeCronIdleSweep)
+	time.Sleep(150 * time.Millisecond)
+	if vm := v.getVM(b, id); vm.State != "running" {
+		t.Fatalf("a pc with a viewer was suspended as idle: %s", vm.State)
+	}
+
+	// The token cannot be used a second time.
+	replay, _, err := websocket.Dial(ctx, st.URL+"?token="+st.Token, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {testOrigin}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replay.CloseNow()
+	if code := wsCloseCode(t, replay); code != stream.CloseBadToken {
+		t.Errorf("replayed token: close code %d, want %d", code, stream.CloseBadToken)
+	}
+
+	// Suspending the PC closes the stream and clears the viewer flag.
+	v.act(b, id, "suspend", 202)
+	if code := wsCloseCode(t, conn); code != stream.CloseNotRunning {
+		t.Errorf("stream after suspend: close code %d, want %d", code, stream.CloseNotRunning)
+	}
+	vm = v.waitState(b, id, "suspended")
+	deadline := time.Now().Add(5 * time.Second)
+	for v.getVM(b, id).ViewerConnected {
+		if time.Now().After(deadline) {
+			t.Fatal("viewer_connected still true after the stream closed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if res := b.post("/api/vms/"+id+"/stream-token", nil); res.Status != 409 || res.Error.Code != "vm_invalid_state" {
+		t.Errorf("stream token for a suspended pc: %d %s", res.Status, res.Raw)
+	}
+}
+
+func TestStreamEventsAreAuthenticatedPerHost(t *testing.T) {
+	v := newVMApp(t)
+	b := v.verifiedUser("alex@example.com")
+	id := v.createVM(b, "My PC").ID.String()
+	otherHost := v.createHost(v.admin, "host-2", "http://127.0.0.1:1")
+
+	send := func(hostID, token, event string) int {
+		raw, _ := json.Marshal(vmtypes.StreamEvent{HostID: hostID, VMID: id, Event: event})
+		req, _ := http.NewRequest("POST", v.srv.URL+"/internal/agent/stream-event", bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if got := send(v.hostID, "wrong-token", "connected"); got != 401 {
+		t.Errorf("wrong token: %d", got)
+	}
+	// Another host, correctly authenticated, cannot touch a VM that is not its own.
+	if got := send(otherHost.Host.ID.String(), otherHost.AgentToken, "connected"); got != 200 {
+		t.Errorf("other host: %d", got)
+	}
+	if vm := v.getVM(b, id); vm.ViewerConnected {
+		t.Fatal("a host changed the viewer flag of another host's vm")
+	}
+	if got := send(v.hostID, v.agentToken, "exploded"); got != 422 {
+		t.Errorf("unknown event: %d", got)
+	}
+	if got := send(v.hostID, v.agentToken, "connected"); got != 200 {
+		t.Errorf("own host: %d", got)
+	}
+	if vm := v.getVM(b, id); !vm.ViewerConnected {
+		t.Fatal("viewer flag not set by the vm's own host")
 	}
 }

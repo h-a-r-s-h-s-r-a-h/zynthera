@@ -17,10 +17,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"zynthera/internal/api/auth"
 	"zynthera/internal/api/heartbeats"
 	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store/sqlcgen"
+	"zynthera/internal/api/vms"
 	"zynthera/internal/shared/httpx"
+	"zynthera/internal/shared/token"
 	"zynthera/internal/shared/vmtypes"
 )
 
@@ -366,4 +369,92 @@ func (s *server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// POST /internal/agent/stream-event
+//
+// A host reports that a desktop viewer connected to, or left, one of its
+// VMs. Both count as activity for the idle rule.
+func (s *server) handleAgentStreamEvent(w http.ResponseWriter, r *http.Request) {
+	var ev vmtypes.StreamEvent
+	if !decodeJSON(w, r, &ev) {
+		return
+	}
+	host, ok := s.authenticateAgent(w, r, ev.HostID)
+	if !ok {
+		return
+	}
+	vmID, err := uuid.Parse(ev.VMID)
+	if err != nil || (ev.Event != "connected" && ev.Event != "disconnected") {
+		httpx.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", "Unknown stream event.", nil)
+		return
+	}
+	// The host id is part of the update, so a host can only report on VMs
+	// that live on it.
+	vm, err := s.Q.SetVMViewer(r.Context(), sqlcgen.SetVMViewerParams{ID: vmID, ViewerConnected: ev.Event == "connected", HostID: host.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+		return
+	}
+	if err != nil {
+		s.internal(w, r, "set viewer", err)
+		return
+	}
+	s.Svc.Publish(r.Context(), vm)
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// streamURL turns a host's public base URL into its WebSocket stream URL.
+func streamURL(publicURL string) string {
+	base := strings.TrimRight(publicURL, "/")
+	if rest, ok := strings.CutPrefix(base, "https://"); ok {
+		return "wss://" + rest + "/stream"
+	}
+	return "ws://" + strings.TrimPrefix(base, "http://") + "/stream"
+}
+
+// issueAgentToken signs a token the browser presents to the VM's host. It is
+// only given for a running VM the caller owns.
+func (s *server) issueAgentToken(w http.ResponseWriter, r *http.Request, purpose string, ttlSeconds int) (tok string, expires time.Time, host sqlcgen.Host, ok bool) {
+	user, _ := currentUser(r.Context())
+	vm, found := s.ownVM(w, r)
+	if !found {
+		return "", time.Time{}, host, false
+	}
+	if !s.allow(w, r, auth.RuleTokensPerUser, user.ID.String()) {
+		return "", time.Time{}, host, false
+	}
+	if vm.State != string(vms.StateRunning) {
+		httpx.WriteError(w, http.StatusConflict, "vm_invalid_state", "This PC is not running.", nil)
+		return "", time.Time{}, host, false
+	}
+	host, err := s.Q.GetHost(r.Context(), vm.HostID)
+	if err != nil {
+		s.internal(w, r, "load host", err)
+		return "", time.Time{}, host, false
+	}
+	secret, err := s.Secrets.Open(host.StreamSecretEnc)
+	if err != nil {
+		s.internal(w, r, "open stream secret", err)
+		return "", time.Time{}, host, false
+	}
+	tok, expires, err = token.Sign(secret, vm.ID.String(), user.ID.String(), purpose, time.Duration(ttlSeconds)*time.Second, time.Now())
+	if err != nil {
+		s.internal(w, r, "sign token", err)
+		return "", time.Time{}, host, false
+	}
+	return tok, expires, host, true
+}
+
+// POST /api/vms/:id/stream-token -> { url, token, expires_at }
+func (s *server) handleStreamToken(w http.ResponseWriter, r *http.Request) {
+	tok, expires, host, ok := s.issueAgentToken(w, r, token.PurposeStream, s.Config.StreamTokenTTLSeconds)
+	if !ok {
+		return
+	}
+	// The token is a credential: it must never be cached.
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"url": streamURL(host.PublicUrl), "token": tok, "expires_at": expires.UTC(),
+	})
 }

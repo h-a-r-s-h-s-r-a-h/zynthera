@@ -3,9 +3,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,9 +19,11 @@ import (
 	"zynthera/internal/agent/driver/mock"
 	"zynthera/internal/agent/heartbeat"
 	"zynthera/internal/agent/server"
+	"zynthera/internal/agent/stream"
 	"zynthera/internal/shared/config"
 	"zynthera/internal/shared/httpx"
 	"zynthera/internal/shared/logging"
+	"zynthera/internal/shared/vmtypes"
 )
 
 func main() {
@@ -50,6 +55,9 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	notifier := &streamNotifier{hostID: cfg.HostID, apiURL: cfg.APIURL, token: cfg.Token, log: log}
+	proxy := stream.New([]byte(cfg.StreamSecret), cfg.WebOrigin, drv, log, notifier.notify)
+
 	hb := &heartbeat.Sender{
 		HostID:   cfg.HostID,
 		Version:  server.Version,
@@ -58,10 +66,16 @@ func run(log *slog.Logger) error {
 		Interval: time.Duration(cfg.HeartbeatSeconds) * time.Second,
 		Driver:   drv,
 		Logger:   log,
+		// Reported in every heartbeat, so a lost notification corrects itself.
+		ViewerConnected: proxy.ViewerConnected,
 	}
 	go hb.Run(ctx)
 
-	router := server.NewRouter(server.Deps{Config: cfg, Logger: log, Driver: drv})
+	router := server.NewRouter(server.Deps{
+		Config: cfg, Logger: log, Driver: drv,
+		Stream:      proxy,
+		OnVMStopped: proxy.CloseVM,
+	})
 	return httpx.Serve(ctx, log, cfg.Addr, router)
 }
 
@@ -78,4 +92,40 @@ func newDriver(cfg agentconfig.Config) (driver.Driver, error) {
 	default:
 		return nil, fmt.Errorf("ZYN_VM_DRIVER=%s is not available yet: the libvirt driver arrives in milestone 5", cfg.VMDriver)
 	}
+}
+
+// streamNotifier tells the control plane when a desktop viewer connects or
+// leaves, so idle detection reacts at once instead of at the next heartbeat.
+type streamNotifier struct {
+	hostID string
+	apiURL string
+	token  string
+	log    *slog.Logger
+}
+
+func (n *streamNotifier) notify(vmID, event string) {
+	// Sent in the background: the stream must not wait for the control plane.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		raw, err := json.Marshal(vmtypes.StreamEvent{HostID: n.hostID, VMID: vmID, Event: event})
+		if err != nil {
+			return
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.apiURL+"/internal/agent/stream-event", bytes.NewReader(raw))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+n.token)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			n.log.Warn("stream event not delivered", "event", event, "vm_id", vmID, "error", err.Error())
+			return
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			n.log.Warn("stream event refused", "event", event, "vm_id", vmID, "status", res.StatusCode)
+		}
+	}()
 }

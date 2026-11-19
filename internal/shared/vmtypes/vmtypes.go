@@ -75,8 +75,9 @@ type Heartbeat struct {
 
 // StreamEvent tells the control plane that a viewer connected or left.
 type StreamEvent struct {
-	VMID  string `json:"vm_id"`
-	Event string `json:"event"` // "connected" | "disconnected"
+	HostID string `json:"host_id"` // which host is reporting, so the API can check its token
+	VMID   string `json:"vm_id"`
+	Event  string `json:"event"` // "connected" | "disconnected"
 }
 
 // ResizeRequest is the body of the agent's resize call.

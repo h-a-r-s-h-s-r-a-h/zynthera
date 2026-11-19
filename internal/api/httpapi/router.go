@@ -108,6 +108,7 @@ func NewRouter(d Deps) (http.Handler, error) {
 	// production the proxy also limits these routes to the hosts' addresses.
 	r.Route("/internal/agent", func(r chi.Router) {
 		r.Post("/heartbeat", s.handleAgentHeartbeat)
+		r.Post("/stream-event", s.handleAgentStreamEvent)
 	})
 
 	r.Route("/api", func(r chi.Router) {
@@ -151,6 +152,7 @@ func NewRouter(d Deps) (http.Handler, error) {
 				r.Post("/reboot", s.vmAction(vms.ActionReboot, jobs.TypeReboot, ""))
 				r.Post("/discard-saved-state", s.vmAction(vms.ActionDiscardSavedState, jobs.TypeDiscard, ""))
 				r.Get("/events", s.handleVMEvents)
+				r.Post("/stream-token", s.handleStreamToken)
 
 				r.Get("/snapshots", s.handleListSnapshots)
 				r.Post("/snapshots", s.handleCreateSnapshot)

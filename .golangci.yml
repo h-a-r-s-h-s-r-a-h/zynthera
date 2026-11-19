@@ -17,8 +17,11 @@ linters:
       - web
     rules:
       # Tests may ignore errors from helpers and use fixed fake secrets.
+      # bodyclose misreads websocket.Dial, whose response body the library
+      # owns, and tests close bodies in ways it cannot follow.
       - path: _test\.go
         linters:
+          - bodyclose
           - errcheck
           - gosec
 

@@ -34,6 +34,11 @@ type Deps struct {
 	Config agentconfig.Config
 	Logger *slog.Logger
 	Driver driver.Driver
+	// Stream serves GET /stream for browsers. Nil leaves the route out.
+	Stream http.Handler
+	// OnVMStopped is called after an operation that stops a VM succeeded,
+	// so open desktop streams can be closed. Nil means nothing to do.
+	OnVMStopped func(vmID string)
 }
 
 type server struct {
@@ -93,6 +98,13 @@ func NewRouter(d Deps) http.Handler {
 		})
 	})
 
+	// For browsers, authenticated by a signed token inside the handler. The
+	// access log above records the path only, never the query string that
+	// carries the token.
+	if d.Stream != nil {
+		r.Get("/stream", d.Stream.ServeHTTP)
+	}
+
 	// Everything below is for the control plane only.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAgentToken)
@@ -110,11 +122,11 @@ func NewRouter(d Deps) http.Handler {
 		r.Route("/vms/{id}", func(r chi.Router) {
 			r.Use(s.validVMID)
 			r.Get("/", s.handleStatus)
-			r.Delete("/", s.locked(s.handleDelete))
+			r.Delete("/", s.locked(s.stops(s.handleDelete)))
 			r.Post("/start", s.locked(s.simple(d.Driver.Start)))
-			r.Post("/suspend", s.locked(s.simple(d.Driver.Suspend)))
-			r.Post("/shutdown", s.locked(s.handleShutdown))
-			r.Post("/force-stop", s.locked(s.simple(d.Driver.ForceStop)))
+			r.Post("/suspend", s.locked(s.stops(s.simple(d.Driver.Suspend))))
+			r.Post("/shutdown", s.locked(s.stops(s.handleShutdown)))
+			r.Post("/force-stop", s.locked(s.stops(s.simple(d.Driver.ForceStop))))
 			r.Post("/reboot", s.locked(s.simple(d.Driver.Reboot)))
 			r.Post("/discard-saved-state", s.locked(s.simple(d.Driver.DiscardSavedState)))
 			r.Post("/resize", s.locked(s.handleResize))
@@ -167,6 +179,27 @@ func (s *server) locked(h http.HandlerFunc) http.HandlerFunc {
 		defer s.locks.unlock(id)
 		h(w, r)
 	}
+}
+
+// stops wraps a handler whose success means the VM is no longer running.
+func (s *server) stops(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w}
+		h(rec, r)
+		if rec.status == http.StatusOK && s.OnVMStopped != nil {
+			s.OnVMStopped(chi.URLParam(r, "id"))
+		}
+	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 // opContext keeps an operation running to its own deadline even if the
