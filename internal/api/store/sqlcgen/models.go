@@ -22,6 +22,26 @@ type EmailToken struct {
 	CreatedAt time.Time
 }
 
+type Host struct {
+	ID              uuid.UUID
+	Name            string
+	AgentUrl        string
+	PublicUrl       string
+	AgentTokenEnc   []byte
+	StreamSecretEnc []byte
+	AdminState      string
+	TotalRamMb      int32
+	TotalVcpus      int32
+	TotalDiskGb     int32
+	FreeDiskGb      int32
+	ReservedRamMb   int32
+	CpuOvercommit   float64
+	Images          []byte
+	AgentVersion    pgtype.Text
+	LastHeartbeatAt *time.Time
+	CreatedAt       time.Time
+}
+
 type Session struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID

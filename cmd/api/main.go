@@ -18,12 +18,14 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"zynthera/internal/api/appconfig"
 	"zynthera/internal/api/auth"
 	"zynthera/internal/api/httpapi"
 	"zynthera/internal/api/mail"
+	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store"
 	"zynthera/internal/api/store/sqlcgen"
 	"zynthera/internal/shared/config"
@@ -105,7 +107,13 @@ func serve(ctx context.Context, log *slog.Logger, cfg appconfig.Config, args []s
 
 	log.Info("starting", "env", cfg.Env, "worker", !*noWorker, "scheduler", !*noScheduler)
 
+	box, err := secrets.New(cfg.SecretsKey)
+	if err != nil {
+		return err
+	}
+
 	router, err := httpapi.NewRouter(httpapi.Deps{
+		Secrets: box,
 		Config:  cfg,
 		Logger:  log,
 		DB:      pool,
@@ -185,5 +193,48 @@ func seed(ctx context.Context, log *slog.Logger, cfg appconfig.Config) error {
 		return fmt.Errorf("seed admin user: %w", err)
 	}
 	log.Info("seed: admin user ready", "email", admin.Email)
+
+	if cfg.IsProduction() {
+		return nil
+	}
+	return seedDevHost(ctx, log, cfg, q)
+}
+
+// seedDevHost registers the developer's own machine as the host "local", with
+// the id and secrets from .env, so the API and the local agent already agree.
+func seedDevHost(ctx context.Context, log *slog.Logger, cfg appconfig.Config, q *sqlcgen.Queries) error {
+	if cfg.AgentHostID == "" || cfg.AgentToken == "" || cfg.AgentStreamSecret == "" {
+		log.Info("seed: no development host (ZYN_AGENT_HOST_ID, ZYN_AGENT_TOKEN or ZYN_AGENT_STREAM_SECRET is empty)")
+		return nil
+	}
+	id, err := uuid.Parse(cfg.AgentHostID)
+	if err != nil {
+		return fmt.Errorf("seed: ZYN_AGENT_HOST_ID is not a UUID: %w", err)
+	}
+	box, err := secrets.New(cfg.SecretsKey)
+	if err != nil {
+		return err
+	}
+	tokenEnc, err := box.Seal([]byte(cfg.AgentToken))
+	if err != nil {
+		return err
+	}
+	secretEnc, err := box.Seal([]byte(cfg.AgentStreamSecret))
+	if err != nil {
+		return err
+	}
+	agentURL := "http://" + cfg.AgentAddr
+	host, err := q.UpsertHostWithID(ctx, sqlcgen.UpsertHostWithIDParams{
+		ID:              id,
+		Name:            "local",
+		AgentUrl:        agentURL,
+		PublicUrl:       agentURL,
+		AgentTokenEnc:   tokenEnc,
+		StreamSecretEnc: secretEnc,
+	})
+	if err != nil {
+		return fmt.Errorf("seed development host: %w", err)
+	}
+	log.Info("seed: development host ready", "name", host.Name, "agent_url", host.AgentUrl)
 	return nil
 }

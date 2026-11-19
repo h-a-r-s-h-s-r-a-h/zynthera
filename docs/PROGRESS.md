@@ -4,9 +4,9 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 
 ## Current status
 
-- **Done:** Milestone 0 (foundations), Milestone 1 (accounts).
-- **Next:** Milestone 2 (host agent with the mock driver), starting at M2.1. The mock desktop
-  image (M2.4) is already built; it still needs the "VNC client can connect" check.
+- **Done:** Milestone 0 (foundations), Milestone 1 (accounts), Milestone 2 (host agent with
+  the mock driver).
+- **Next:** Milestone 3 (VM lifecycle in the control plane), starting at M3.1.
 - **Mode:** mock driver for milestones 0 to 4, then real KVM on this machine from milestone 5.
 
 ## Environment check (M0.1, 2026-11-19)
@@ -63,6 +63,23 @@ The seeded admin is `admin@zynthera.local` with the password from `ZYN_SEED_ADMI
   log and in the `sessions` table (IP, user agent), not yet in a dedicated audit table.
   Planned with the security review in M7.9.
 
+## Verified at the end of milestone 2
+
+- Driver conformance suite (14 groups) passes against the mock driver.
+- Agent API tests: token required on every control-plane route, UUID and body validation,
+  error mapping, and "409 busy" for a second operation on a VM that is being worked on.
+- API tests: admin-only routes, host secrets shown once and stored encrypted, heartbeat
+  authentication per host, online/offline calculation, host patch.
+- One test runs a real agent (mock driver) against the real API: heartbeat, then
+  create, start, suspend, status, delete through the control plane's agent client.
+- By hand with `make dev`: `GET /api/admin/hosts` shows `local` online with 32768 MB RAM,
+  16 vCPUs, 500 GB disk and two images; `curl` with the agent token creates, starts,
+  suspends and deletes a mock VM; the same calls without the token get 401.
+- The mock desktop container answers a VNC handshake on 127.0.0.1:5901 at 1920x1080 with an
+  XFCE session running. Seeing the picture in a viewer comes with the browser viewer in M4.
+- Not built yet: the heartbeat's VM list is received but not stored; the reconciler that
+  needs it arrives in M3.11, together with `disk_used_bytes` and `viewer_connected`.
+
 ## Deployment milestone (added to the spec, see docs/DECISIONS.md D-001)
 
 Goal: a fresh Ubuntu server becomes a working Zynthera with one command.
@@ -117,17 +134,17 @@ Goal: people can sign up, verify their email, log in and reset a password.
 
 Goal: the control plane knows about a host and can drive fake VMs on it.
 
-- [ ] **M2.1** `internal/shared/vmtypes` from section 11.2.
-- [ ] **M2.2** The `Driver` and `Storage` interfaces and the driver conformance test suite.
-- [ ] **M2.3** Mock driver with persistence, delays and failure injection.
-- [ ] **M2.4** `infra/dev-desktop` Dockerfile and its Compose service. Confirm a VNC client can connect to `127.0.0.1:5901` and sees an XFCE desktop.
-- [ ] **M2.5** Agent HTTP API for the control plane: bearer auth, UUID validation, per-VM mutex, error envelope.
-- [ ] **M2.6** Migration for `hosts`. `internal/api/secrets` (AES-GCM) with tests.
-- [ ] **M2.7** `internal/api/agentclient`: a typed client with timeouts and error mapping.
-- [ ] **M2.8** Heartbeats: the agent loop, the `/internal/agent/heartbeat` handler, and the "online" calculation.
-- [ ] **M2.9** Admin middleware and the host endpoints: list, create (secrets shown once), patch.
-- [ ] **M2.10** Seed the development host `local` from `.env`.
-- [ ] **M2.11** Tests: the conformance suite against the mock driver, agent auth, and a heartbeat integration test.
+- [x] **M2.1** `internal/shared/vmtypes` from section 11.2.
+- [x] **M2.2** The `Driver` and `Storage` interfaces and the driver conformance test suite.
+- [x] **M2.3** Mock driver with persistence, delays and failure injection.
+- [x] **M2.4** `infra/dev-desktop` Dockerfile and its Compose service. Confirm a VNC client can connect to `127.0.0.1:5901` and sees an XFCE desktop.
+- [x] **M2.5** Agent HTTP API for the control plane: bearer auth, UUID validation, per-VM mutex, error envelope.
+- [x] **M2.6** Migration for `hosts`. `internal/api/secrets` (AES-GCM) with tests.
+- [x] **M2.7** `internal/api/agentclient`: a typed client with timeouts and error mapping.
+- [x] **M2.8** Heartbeats: the agent loop, the `/internal/agent/heartbeat` handler, and the "online" calculation.
+- [x] **M2.9** Admin middleware and the host endpoints: list, create (secrets shown once), patch.
+- [x] **M2.10** Seed the development host `local` from `.env`.
+- [x] **M2.11** Tests: the conformance suite against the mock driver, agent auth, and a heartbeat integration test.
 
 **Done when:** with `make dev` running, `GET /api/admin/hosts` shows `local` as online with capacity; `curl` with the agent token can create, start, suspend and delete a mock VM; the same calls without the token get 401.
 

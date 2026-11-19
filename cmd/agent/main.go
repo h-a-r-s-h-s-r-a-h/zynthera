@@ -9,10 +9,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"zynthera/internal/agent/agentconfig"
 	"zynthera/internal/agent/driver"
 	"zynthera/internal/agent/driver/mock"
+	"zynthera/internal/agent/heartbeat"
 	"zynthera/internal/agent/server"
 	"zynthera/internal/shared/config"
 	"zynthera/internal/shared/httpx"
@@ -47,6 +49,17 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+
+	hb := &heartbeat.Sender{
+		HostID:   cfg.HostID,
+		Version:  server.Version,
+		APIURL:   cfg.APIURL,
+		Token:    cfg.Token,
+		Interval: time.Duration(cfg.HeartbeatSeconds) * time.Second,
+		Driver:   drv,
+		Logger:   log,
+	}
+	go hb.Run(ctx)
 
 	router := server.NewRouter(server.Deps{Config: cfg, Logger: log, Driver: drv})
 	return httpx.Serve(ctx, log, cfg.Addr, router)

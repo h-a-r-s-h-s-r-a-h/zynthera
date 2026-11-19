@@ -32,3 +32,5 @@ sql:
               pointer: true
           - db_type: "citext"
             go_type: "string"
+          - column: "hosts.cpu_overcommit"
+            go_type: "float64"

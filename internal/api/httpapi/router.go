@@ -15,6 +15,7 @@ import (
 	"zynthera/internal/api/appconfig"
 	"zynthera/internal/api/auth"
 	"zynthera/internal/api/mail"
+	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store/sqlcgen"
 	"zynthera/internal/shared/httpx"
 )
@@ -43,6 +44,8 @@ type Deps struct {
 	Redis   Pinger
 	Limiter auth.Limiter
 	Mailer  mail.Sender
+	// Secrets encrypts host credentials stored in the database.
+	Secrets *secrets.Box
 	// Argon2 is the cost of hashing account passwords.
 	Argon2 auth.Argon2Params
 	// Go runs background work. Nil means "start a goroutine".
@@ -90,6 +93,12 @@ func NewRouter(d Deps) (http.Handler, error) {
 
 	r.Get("/health", s.handleHealth)
 
+	// Called by host agents, authenticated with the host's agent token. In
+	// production the proxy also limits these routes to the hosts' addresses.
+	r.Route("/internal/agent", func(r chi.Router) {
+		r.Post("/heartbeat", s.handleAgentHeartbeat)
+	})
+
 	r.Route("/api", func(r chi.Router) {
 		r.Use(s.loadSession)
 		r.Use(originCheck(d.Config.WebOrigin))
@@ -110,6 +119,14 @@ func NewRouter(d Deps) (http.Handler, error) {
 				r.Get("/me", s.handleMe)
 				r.Post("/resend-verification", s.handleResendVerification)
 			})
+		})
+
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(requireUser)
+			r.Use(requireAdmin)
+			r.Get("/hosts", s.handleAdminListHosts)
+			r.Post("/hosts", s.handleAdminCreateHost)
+			r.Patch("/hosts/{id}", s.handleAdminPatchHost)
 		})
 	})
 

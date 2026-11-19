@@ -87,3 +87,27 @@ are a convenience.
 ## D-014 Go integration tests run one package at a time
 
 All packages share the `zynthera_test` database, so `make test` uses `go test -p 1`.
+
+## D-015 The conformance suite lives in `internal/agent/driver/drivertest`
+
+The spec places it "in `internal/agent/driver`". A sub-package keeps the `testing` package
+out of the agent binary while still letting every driver's tests call the same suite.
+
+## D-016 The agent validates every VMSpec itself
+
+The agent runs as root, so it does not rely on the control plane's validation. Ids must be
+lower-case UUIDs, and image slug, version, hostname, username, password hash and bridge
+token must each match a strict pattern before any driver sees them.
+
+## D-017 Agent operations outlive a dropped connection
+
+A VM operation keeps running to its own 15-minute limit even if the calling job
+disconnects. A suspend or delete that stops halfway is worse than one whose result nobody
+reads, and the control plane's stuck-VM check settles the state afterwards.
+
+## D-018 Driver error semantics
+
+`Status` of an unknown VM reports `missing` without an error and `Delete` of an unknown VM
+succeeds; every other operation on an unknown VM returns "not found". Suspending a VM that
+is not running succeeds and changes nothing. These rules are pinned by the conformance
+suite, so the libvirt driver must match them.

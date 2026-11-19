@@ -17,6 +17,7 @@ import (
 	"zynthera/internal/api/appconfig"
 	"zynthera/internal/api/auth"
 	"zynthera/internal/api/mail"
+	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store/sqlcgen"
 	"zynthera/internal/api/testdb"
 	"zynthera/internal/shared/httpx"
@@ -41,8 +42,13 @@ func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	pool, rdb := testdb.Open(t)
 	mailer := &mail.Fake{}
+	box, err := secrets.New(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
 	h, err := NewRouter(Deps{
-		Config:  appconfig.Config{WebOrigin: testOrigin, SessionTTLHours: 720},
+		Secrets: box,
+		Config:  appconfig.Config{WebOrigin: testOrigin, SessionTTLHours: 720, HostOfflineAfterSeconds: 45},
 		Logger:  logging.NewTo(io.Discard, "test"),
 		DB:      pool,
 		Q:       sqlcgen.New(pool),
