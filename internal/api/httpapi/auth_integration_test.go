@@ -9,17 +9,24 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"zynthera/internal/api/appconfig"
 	"zynthera/internal/api/auth"
+	"zynthera/internal/api/events"
+	"zynthera/internal/api/jobs"
 	"zynthera/internal/api/mail"
 	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store/sqlcgen"
 	"zynthera/internal/api/testdb"
+	"zynthera/internal/api/vmsvc"
 	"zynthera/internal/shared/httpx"
 	"zynthera/internal/shared/logging"
 )
@@ -30,28 +37,69 @@ type redisPing struct{ ping func(context.Context) error }
 
 func (r redisPing) Ping(ctx context.Context) error { return r.ping(ctx) }
 
-// testApp is a real API on a real database, with a fake mailer.
+// testApp is a real API on a real database and Redis, with real job workers
+// and a fake mailer.
 type testApp struct {
 	t      *testing.T
 	srv    *httptest.Server
 	mailer *mail.Fake
 	pool   *pgxpool.Pool
+	rdb    *redis.Client
+	svc    *vmsvc.Service
+	worker *jobs.Worker
+	cfg    appconfig.Config
+}
+
+func testConfig() appconfig.Config {
+	return appconfig.Config{
+		WebOrigin: testOrigin, SessionTTLHours: 720, HostOfflineAfterSeconds: 45,
+		AllowedRAMMB: []int{2048, 4096, 8192, 16384}, AllowedVCPUs: []int{1, 2, 4, 8}, AllowedDiskGB: []int{40, 80, 160},
+		DefaultMaxVMs: 1, DefaultMaxRAMMB: 16384, DefaultMaxVCPUs: 8, DefaultMaxDiskGB: 160,
+		IdleSuspendMinutes: 15, IdleInputMinutes: 60, MaxKeepAliveHours: 12, MaxSnapshotsPerVM: 5,
+		StreamTokenTTLSeconds: 60, FilesTokenTTLSeconds: 600, DiskHeadroomPercent: 10,
+	}
 }
 
 func newTestApp(t *testing.T) *testApp {
 	t.Helper()
 	pool, rdb := testdb.Open(t)
 	mailer := &mail.Fake{}
+	// ZYN_TEST_LOG=1 shows the API's log, which is where the cause of an
+	// unexpected 500 is written.
+	logOut := io.Discard
+	if os.Getenv("ZYN_TEST_LOG") != "" {
+		logOut = os.Stderr
+	}
+	log := logging.NewTo(logOut, "test")
 	box, err := secrets.New(bytes.Repeat([]byte{7}, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg := testConfig()
+	q := sqlcgen.New(pool)
+	bus := events.NewBus(rdb)
+	svc := &vmsvc.Service{Pool: pool, Q: q, Config: cfg, Secrets: box, Logger: log, Events: bus}
+	queue := jobs.NewQueue(asynq.NewClientFromRedisClient(rdb))
+	worker := &jobs.Worker{Svc: svc, Queue: queue, Redis: rdb, Logger: log}
+
+	// Real workers on the test Redis, so tests exercise the whole path from
+	// HTTP request to finished job.
+	jobSrv := jobs.NewServer(rdb, log, jobs.ServerOptions{Concurrency: 8, PollInterval: 20 * time.Millisecond})
+	if err := jobSrv.Start(worker.Mux()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(jobSrv.Shutdown)
+
 	h, err := NewRouter(Deps{
 		Secrets: box,
-		Config:  appconfig.Config{WebOrigin: testOrigin, SessionTTLHours: 720, HostOfflineAfterSeconds: 45},
-		Logger:  logging.NewTo(io.Discard, "test"),
+		Svc:     svc,
+		Queue:   queue,
+		Bus:     bus,
+		RDB:     rdb,
+		Config:  cfg,
+		Logger:  log,
 		DB:      pool,
-		Q:       sqlcgen.New(pool),
+		Q:       q,
 		Redis:   redisPing{func(ctx context.Context) error { return rdb.Ping(ctx).Err() }},
 		Limiter: auth.NewRedisLimiter(rdb),
 		Mailer:  mailer,
@@ -63,7 +111,7 @@ func newTestApp(t *testing.T) *testApp {
 	}
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &testApp{t: t, srv: srv, mailer: mailer, pool: pool}
+	return &testApp{t: t, srv: srv, mailer: mailer, pool: pool, rdb: rdb, svc: svc, worker: worker, cfg: cfg}
 }
 
 // browser is an HTTP client with its own cookie jar, like one browser.

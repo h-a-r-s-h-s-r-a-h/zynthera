@@ -13,8 +13,11 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"zynthera/internal/api/auth"
+	"zynthera/internal/api/jobs"
 	mailer "zynthera/internal/api/mail"
 	"zynthera/internal/api/store/sqlcgen"
+	"zynthera/internal/api/vms"
+	"zynthera/internal/api/vmsvc"
 	"zynthera/internal/shared/httpx"
 )
 
@@ -226,6 +229,9 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/logout
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if user, ok := currentUser(r.Context()); ok {
+		s.suspendOnLogout(r.Context(), user)
+	}
 	if err := s.endSession(w, r); err != nil {
 		s.internal(w, r, "end session", err)
 		return
@@ -399,4 +405,30 @@ func (s *server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 	s.clearSessionCookie(w)
 	s.Logger.InfoContext(r.Context(), "password reset", "user_id", userID.String())
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// suspendOnLogout suspends the user's running PCs, except those with an
+// active keep-alive. Problems are logged and never block the logout: a PC
+// that stays running is caught by the idle rule later.
+func (s *server) suspendOnLogout(ctx context.Context, user sqlcgen.User) {
+	running, err := s.Q.ListRunningVMsForUser(ctx, user.ID)
+	if err != nil {
+		s.Logger.ErrorContext(ctx, "logout: list running vms", "error", err.Error())
+		return
+	}
+	now := time.Now()
+	for _, vm := range running {
+		if vm.KeepAliveUntil != nil && vm.KeepAliveUntil.After(now) {
+			continue
+		}
+		if _, _, err := s.Svc.Begin(ctx, vm.ID, vms.ActionSuspend, vmsvc.BeginOpts{}); err != nil {
+			if !errors.Is(err, vmsvc.ErrInvalidState) && !errors.Is(err, vmsvc.ErrNotFound) {
+				s.Logger.ErrorContext(ctx, "logout: begin suspend", "vm_id", vm.ID.String(), "error", err.Error())
+			}
+			continue
+		}
+		if err := s.Queue.Enqueue(ctx, jobs.TypeSuspend, jobs.Payload{VMID: vm.ID, Actor: "user", Reason: "logout"}); err != nil {
+			s.Logger.ErrorContext(ctx, "logout: enqueue suspend", "vm_id", vm.ID.String(), "error", err.Error())
+		}
+	}
 }

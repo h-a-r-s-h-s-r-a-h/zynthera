@@ -108,7 +108,13 @@ WHERE user_id = $1 AND deleted_at IS NULL;
 -- name: LockHost :one
 -- Taken before every capacity decision, so two requests cannot both take
 -- the last free RAM or disk.
-SELECT * FROM hosts WHERE id = $1 FOR UPDATE;
+--
+-- FOR NO KEY UPDATE, not FOR UPDATE: inserting a usage interval or a VM
+-- takes a foreign-key (KEY SHARE) lock on the host row. A job that holds a VM
+-- row and inserts a usage interval would deadlock against a request that
+-- holds FOR UPDATE on the host and waits for that VM row. NO KEY UPDATE still
+-- excludes other capacity decisions but lets foreign-key checks through.
+SELECT * FROM hosts WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: HostResourceUsage :one
 -- RAM and vCPUs held by VMs that are running or about to run.
@@ -185,3 +191,12 @@ UPDATE snapshots SET status = $2, size_bytes = $3 WHERE id = $1;
 
 -- name: DeleteSnapshotRow :exec
 DELETE FROM snapshots WHERE id = $1;
+
+-- name: GetVMForUpdate :one
+-- Locks the VM row for the rest of the transaction, so the state that is
+-- checked is the state that gets changed.
+SELECT * FROM vms WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE;
+
+-- name: LockUser :one
+-- Taken while checking per-user limits, so two creations cannot both pass.
+SELECT * FROM users WHERE id = $1 FOR NO KEY UPDATE;

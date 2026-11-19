@@ -167,6 +167,42 @@ func (q *Queries) GetVM(ctx context.Context, id uuid.UUID) (Vm, error) {
 	return i, err
 }
 
+const getVMForUpdate = `-- name: GetVMForUpdate :one
+SELECT id, user_id, host_id, os_image_id, image_version, name, ram_mb, vcpus, disk_gb, linux_username, pending_password_hash, state, state_changed_at, state_detail, has_saved_state, viewer_connected, last_active_at, keep_alive_until, disk_used_bytes, created_at, updated_at, deleted_at FROM vms WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE
+`
+
+// Locks the VM row for the rest of the transaction, so the state that is
+// checked is the state that gets changed.
+func (q *Queries) GetVMForUpdate(ctx context.Context, id uuid.UUID) (Vm, error) {
+	row := q.db.QueryRow(ctx, getVMForUpdate, id)
+	var i Vm
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.HostID,
+		&i.OsImageID,
+		&i.ImageVersion,
+		&i.Name,
+		&i.RamMb,
+		&i.Vcpus,
+		&i.DiskGb,
+		&i.LinuxUsername,
+		&i.PendingPasswordHash,
+		&i.State,
+		&i.StateChangedAt,
+		&i.StateDetail,
+		&i.HasSavedState,
+		&i.ViewerConnected,
+		&i.LastActiveAt,
+		&i.KeepAliveUntil,
+		&i.DiskUsedBytes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getVMForUser = `-- name: GetVMForUser :one
 SELECT id, user_id, host_id, os_image_id, image_version, name, ram_mb, vcpus, disk_gb, linux_username, pending_password_hash, state, state_changed_at, state_detail, has_saved_state, viewer_connected, last_active_at, keep_alive_until, disk_used_bytes, created_at, updated_at, deleted_at FROM vms WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
 `
@@ -711,11 +747,17 @@ func (q *Queries) ListVMsForUser(ctx context.Context, userID uuid.UUID) ([]Vm, e
 }
 
 const lockHost = `-- name: LockHost :one
-SELECT id, name, agent_url, public_url, agent_token_enc, stream_secret_enc, admin_state, total_ram_mb, total_vcpus, total_disk_gb, free_disk_gb, reserved_ram_mb, cpu_overcommit, images, agent_version, last_heartbeat_at, created_at FROM hosts WHERE id = $1 FOR UPDATE
+SELECT id, name, agent_url, public_url, agent_token_enc, stream_secret_enc, admin_state, total_ram_mb, total_vcpus, total_disk_gb, free_disk_gb, reserved_ram_mb, cpu_overcommit, images, agent_version, last_heartbeat_at, created_at FROM hosts WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // Taken before every capacity decision, so two requests cannot both take
 // the last free RAM or disk.
+//
+// FOR NO KEY UPDATE, not FOR UPDATE: inserting a usage interval or a VM
+// takes a foreign-key (KEY SHARE) lock on the host row. A job that holds a VM
+// row and inserts a usage interval would deadlock against a request that
+// holds FOR UPDATE on the host and waits for that VM row. NO KEY UPDATE still
+// excludes other capacity decisions but lets foreign-key checks through.
 func (q *Queries) LockHost(ctx context.Context, id uuid.UUID) (Host, error) {
 	row := q.db.QueryRow(ctx, lockHost, id)
 	var i Host
@@ -737,6 +779,31 @@ func (q *Queries) LockHost(ctx context.Context, id uuid.UUID) (Host, error) {
 		&i.AgentVersion,
 		&i.LastHeartbeatAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const lockUser = `-- name: LockUser :one
+SELECT id, email, password_hash, role, email_verified_at, disabled_at, max_vms, max_ram_mb, max_vcpus, max_disk_gb, created_at, updated_at FROM users WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Taken while checking per-user limits, so two creations cannot both pass.
+func (q *Queries) LockUser(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, lockUser, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.EmailVerifiedAt,
+		&i.DisabledAt,
+		&i.MaxVms,
+		&i.MaxRamMb,
+		&i.MaxVcpus,
+		&i.MaxDiskGb,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

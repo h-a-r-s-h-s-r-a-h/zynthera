@@ -19,15 +19,19 @@ import (
 	"syscall"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 
 	"zynthera/internal/api/appconfig"
 	"zynthera/internal/api/auth"
+	"zynthera/internal/api/events"
 	"zynthera/internal/api/httpapi"
+	"zynthera/internal/api/jobs"
 	"zynthera/internal/api/mail"
 	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store"
 	"zynthera/internal/api/store/sqlcgen"
+	"zynthera/internal/api/vmsvc"
 	"zynthera/internal/shared/config"
 	"zynthera/internal/shared/httpx"
 	"zynthera/internal/shared/logging"
@@ -112,12 +116,41 @@ func serve(ctx context.Context, log *slog.Logger, cfg appconfig.Config, args []s
 		return err
 	}
 
+	q := sqlcgen.New(pool)
+	bus := events.NewBus(rdb)
+	svc := &vmsvc.Service{Pool: pool, Q: q, Config: cfg, Secrets: box, Logger: log, Events: bus}
+	asynqClient := asynq.NewClientFromRedisClient(rdb)
+	queue := jobs.NewQueue(asynqClient)
+
+	if !*noWorker {
+		worker := &jobs.Worker{Svc: svc, Queue: queue, Redis: rdb, Logger: log}
+		srv := jobs.NewServer(rdb, log, jobs.ServerOptions{})
+		if err := srv.Start(worker.Mux()); err != nil {
+			return fmt.Errorf("start job workers: %w", err)
+		}
+		defer srv.Shutdown()
+	}
+	if !*noScheduler {
+		sched, err := jobs.NewScheduler(rdb, log)
+		if err != nil {
+			return err
+		}
+		if err := sched.Start(); err != nil {
+			return fmt.Errorf("start scheduler: %w", err)
+		}
+		defer sched.Shutdown()
+	}
+
 	router, err := httpapi.NewRouter(httpapi.Deps{
 		Secrets: box,
+		Svc:     svc,
+		Queue:   queue,
+		Bus:     bus,
+		RDB:     rdb,
 		Config:  cfg,
 		Logger:  log,
 		DB:      pool,
-		Q:       sqlcgen.New(pool),
+		Q:       q,
 		Redis:   redisPinger{rdb},
 		Limiter: auth.NewRedisLimiter(rdb),
 		Mailer: mail.SMTPSender{

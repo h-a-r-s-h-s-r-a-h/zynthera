@@ -11,12 +11,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 
 	"zynthera/internal/api/appconfig"
 	"zynthera/internal/api/auth"
+	"zynthera/internal/api/events"
+	"zynthera/internal/api/jobs"
 	"zynthera/internal/api/mail"
 	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store/sqlcgen"
+	"zynthera/internal/api/vms"
+	"zynthera/internal/api/vmsvc"
 	"zynthera/internal/shared/httpx"
 )
 
@@ -46,6 +51,12 @@ type Deps struct {
 	Mailer  mail.Sender
 	// Secrets encrypts host credentials stored in the database.
 	Secrets *secrets.Box
+	// Svc changes VM state; Queue runs the jobs; Bus carries live updates.
+	Svc   *vmsvc.Service
+	Queue jobs.Enqueuer
+	Bus   *events.Bus
+	// RDB stores the hosts' recent heartbeats for the reconciler.
+	RDB *redis.Client
 	// Argon2 is the cost of hashing account passwords.
 	Argon2 auth.Argon2Params
 	// Go runs background work. Nil means "start a goroutine".
@@ -118,6 +129,33 @@ func NewRouter(d Deps) (http.Handler, error) {
 				r.Use(requireUser)
 				r.Get("/me", s.handleMe)
 				r.Post("/resend-verification", s.handleResendVerification)
+			})
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(requireUser)
+			r.Get("/images", s.handleListImages)
+			r.Get("/options", s.handleOptions)
+			r.Get("/events", s.handleEvents)
+
+			r.Get("/vms", s.handleListVMs)
+			r.Post("/vms", s.handleCreateVM)
+			r.Route("/vms/{id}", func(r chi.Router) {
+				r.Get("/", s.handleGetVM)
+				r.Patch("/", s.handlePatchVM)
+				r.Delete("/", s.vmAction(vms.ActionDelete, jobs.TypeDelete, ""))
+				r.Post("/start", s.vmAction(vms.ActionStart, jobs.TypeStart, ""))
+				r.Post("/suspend", s.vmAction(vms.ActionSuspend, jobs.TypeSuspend, "user"))
+				r.Post("/shutdown", s.vmAction(vms.ActionShutdown, jobs.TypeShutdown, ""))
+				r.Post("/force-stop", s.vmAction(vms.ActionForceStop, jobs.TypeForceStop, ""))
+				r.Post("/reboot", s.vmAction(vms.ActionReboot, jobs.TypeReboot, ""))
+				r.Post("/discard-saved-state", s.vmAction(vms.ActionDiscardSavedState, jobs.TypeDiscard, ""))
+				r.Get("/events", s.handleVMEvents)
+
+				r.Get("/snapshots", s.handleListSnapshots)
+				r.Post("/snapshots", s.handleCreateSnapshot)
+				r.Post("/snapshots/{sid}/restore", s.snapshotAction(vms.ActionRestoreSnapshot, jobs.TypeSnapshotRestore, "Restoring a snapshot"))
+				r.Delete("/snapshots/{sid}", s.snapshotAction(vms.ActionDeleteSnapshot, jobs.TypeSnapshotDelete, "Deleting a snapshot"))
 			})
 		})
 

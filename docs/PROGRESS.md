@@ -6,20 +6,11 @@ Read this file and `PROJECT_SPEC.md` at the start of every session.
 
 - **Done:** Milestone 0 (foundations), Milestone 1 (accounts), Milestone 2 (host agent with
   the mock driver).
-- **In progress:** Milestone 3 (VM lifecycle in the control plane). Done so far: M3.1 tables,
-  queries and image seed; M3.2 state machine; the pure half of M3.4 (`internal/api/scheduler`,
-  capacity arithmetic with tests); asynq v0.26 added to `go.mod`.
-- **Next:** the rest of milestone 3, in this order:
-  1. `internal/api/vmsvc`: one service used by handlers and jobs. `Begin` (lock host, check
-     capacity, lock the VM row, compare-and-set into the transitional state) and `Settle`
-     (leave the transitional state, write the event, open or close the usage interval, publish).
-  2. `internal/api/jobs`: asynq client, server with the three queues, one handler per task
-     from spec 10.5, and the periodic tasks.
-  3. `internal/api/events`: Redis pub/sub per user and `GET /api/events` (Server-Sent Events).
-  4. VM, snapshot, image and options handlers in `internal/api/httpapi`.
-  5. Store the heartbeat's VM list in Redis (last two per host) for the reconciler.
-  6. M3.12: the full lifecycle integration test.
-- **Mode:** mock driver for milestones 0 to 4, then real KVM on this machine from milestone 5.
+- **Also done:** Milestone 3 (VM lifecycle in the control plane), and M4.10's backend half
+  (logout suspends running PCs).
+- **Next:** Milestone 4 (desktop in the browser), starting at M4.1 (`internal/shared/token`).
+  Then the stream proxy in the agent, the dashboard with VM cards, the creation wizard and the
+  noVNC viewer.
 
 ## Environment check (M0.1, 2026-11-19)
 
@@ -91,6 +82,33 @@ The seeded admin is `admin@zynthera.local` with the password from `ZYN_SEED_ADMI
   XFCE session running. Seeing the picture in a viewer comes with the browser viewer in M4.
 - Not built yet: the heartbeat's VM list is received but not stored; the reconciler that
   needs it arrives in M3.11, together with `disk_used_bytes` and `viewer_connected`.
+
+## Verified at the end of milestone 3
+
+- State machine: every action in every state, with and without a saved session.
+- Scheduler arithmetic: RAM never overcommitted, vCPU overcommit factor, disk headroom,
+  placement rules, per-user limits.
+- 15 API integration tests with real Postgres, Redis, job workers and a real agent on the
+  mock driver. `TestVMLifecycle` runs create, suspend, resume, reboot, snapshot (of a running
+  PC), shutdown, restore, resize, rename, keep-alive, start and delete, and checks the events
+  and usage intervals in the database after each step.
+- Failure paths: a failing suspend lands in `error` with a readable message and recovers by
+  force stop and start; a failing provision can be deleted; a guest that ignores shutdown
+  returns to `running` with a "use Force stop" hint.
+- Concurrency: 8 simultaneous starts of one PC, exactly one accepted; 4 simultaneous starts
+  on a host with room for one, exactly one accepted and three `no_capacity`.
+- Isolation: a second user gets 404 on all 14 VM and snapshot routes, identical to an id
+  that does not exist.
+- Periodic tasks run directly in tests: reconcile (needs two agreeing heartbeats), idle
+  sweep (respects keep-alive), plus logout suspend.
+- Live updates: the event stream delivers the current list, then each state change, and
+  never another user's PCs.
+- By hand with `make dev`: a PC went from create to `running` in 8.3 s (the mock driver's
+  5 s + 3 s delays), and the event stream through the web app's `/api` rewrite showed
+  provisioning, starting, running, suspending, suspended as they happened.
+- A deadlock found by the concurrency test was fixed (docs/DECISIONS.md D-021).
+- Not run yet: the hourly session cleanup task and the stuck-VM check have no test of
+  their own (the stuck-VM check shares `settleFromHost` with the tested failure paths).
 
 ## Deployment milestone (added to the spec, see docs/DECISIONS.md D-001)
 
@@ -166,16 +184,16 @@ Goal: the full lifecycle works through the API, with correct state handling unde
 
 - [x] **M3.1** Migrations for `os_images`, `vms`, `vm_events`, `snapshots`, `usage_intervals`. Seed the image rows.
 - [x] **M3.2** State machine package with table-driven tests covering every action in every state.
-- [ ] **M3.3** asynq wiring: client, server, the three queues, task constructors, logging and panic-recovery middleware, periodic task registration.
-- [ ] **M3.4** Scheduler package: host choice and capacity check under a host row lock, with a test that fires concurrent starts at a nearly full host.
-- [ ] **M3.5** Validation and limits. `GET /api/images` and `GET /api/options`.
-- [ ] **M3.6** VM handlers: list, get, create, patch (rename and keep-alive), delete, and the action endpoints, all using the compare-and-set update.
-- [ ] **M3.7** Job handlers: provision, start, suspend, shutdown, force stop, reboot, discard saved state, resize, delete.
-- [ ] **M3.8** Events and usage intervals written in the same transaction as each state change.
-- [ ] **M3.9** Live updates: publish to Redis on every change, `GET /api/events` as Server-Sent Events.
-- [ ] **M3.10** Snapshots: endpoints, jobs and the per-VM limit, against the mock driver.
-- [ ] **M3.11** Periodic tasks: reconcile, stuck VMs, idle sweep (using `last_active_at` only until milestone 4 adds viewer tracking), session cleanup.
-- [ ] **M3.12** An integration test that runs the whole lifecycle against the mock driver: create, start, suspend, resume, snapshot, restore, resize, delete; a forced failure that lands in `error` and recovers; two simultaneous start requests where exactly one wins; a start refused for lack of capacity.
+- [x] **M3.3** asynq wiring: client, server, the three queues, task constructors, logging and panic-recovery middleware, periodic task registration.
+- [x] **M3.4** Scheduler package: host choice and capacity check under a host row lock, with a test that fires concurrent starts at a nearly full host.
+- [x] **M3.5** Validation and limits. `GET /api/images` and `GET /api/options`.
+- [x] **M3.6** VM handlers: list, get, create, patch (rename and keep-alive), delete, and the action endpoints, all using the compare-and-set update.
+- [x] **M3.7** Job handlers: provision, start, suspend, shutdown, force stop, reboot, discard saved state, resize, delete.
+- [x] **M3.8** Events and usage intervals written in the same transaction as each state change.
+- [x] **M3.9** Live updates: publish to Redis on every change, `GET /api/events` as Server-Sent Events.
+- [x] **M3.10** Snapshots: endpoints, jobs and the per-VM limit, against the mock driver.
+- [x] **M3.11** Periodic tasks: reconcile, stuck VMs, idle sweep (using `last_active_at` only until milestone 4 adds viewer tracking), session cleanup.
+- [x] **M3.12** An integration test that runs the whole lifecycle against the mock driver: create, start, suspend, resume, snapshot, restore, resize, delete; a forced failure that lands in `error` and recovers; two simultaneous start requests where exactly one wins; a start refused for lack of capacity.
 
 **Done when:** the lifecycle test passes, and the database shows the expected events and usage intervals afterwards.
 

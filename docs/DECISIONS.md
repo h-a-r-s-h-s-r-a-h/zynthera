@@ -111,3 +111,51 @@ reads, and the control plane's stuck-VM check settles the state afterwards.
 succeeds; every other operation on an unknown VM returns "not found". Suspending a VM that
 is not running succeeds and changes nothing. These rules are pinned by the conformance
 suite, so the libvirt driver must match them.
+
+## D-019 `internal/api/vmsvc` is the only code that changes a VM's state
+
+Not in the spec's layout. Handlers call `Begin` (into a transitional state), jobs call
+`Settle` (out of it). Both keep the event row, the usage interval and the live update in one
+place and one transaction, so they cannot drift apart. `internal/api/vms` stays pure rules.
+
+## D-020 Events are written when a job finishes, not when it is requested
+
+The history shows what happened ("PC suspended because you logged out"), with the actor
+carried in the job payload. Requests that were refused leave no event.
+
+## D-021 Row locks use FOR NO KEY UPDATE
+
+The spec says to lock the host row with `SELECT ... FOR UPDATE`. That deadlocked: a job
+holding a VM row inserts a usage interval, which takes a foreign-key lock on the host row,
+while a start request holds `FOR UPDATE` on the host and waits for the VM row. `FOR NO KEY
+UPDATE` still serialises capacity decisions but does not block foreign-key checks. The same
+applies to the user row (limits) and the VM row. Lock order is always host, then VM.
+
+## D-022 A new PC's start is capacity-checked in the job
+
+Creation only needs disk. A PC coming from provisioning has not been through the start
+check, so `vm:start` re-checks RAM and CPU; if the host is full the PC settles as `stopped`
+with an explanation instead of failing.
+
+## D-023 Reboot failure and usage
+
+A reboot keeps the usage interval open. If the reboot job ends in `error`, the interval is
+closed at that point.
+
+## D-024 The job queue polls every 200 ms
+
+asynq's default is one second, which a user feels as a pause after every click.
+
+## D-025 The event stream sends a `ready` event after the initial list
+
+So the browser knows the list is complete and can drop PCs it no longer received.
+
+## D-026 Heartbeat VM lists live in Redis
+
+The last two per host, with their arrival time, expiring after two minutes. The reconciler
+acts only when both agree and both are newer than the VM's last state change.
+
+## D-027 SHA-512 crypt comes from `github.com/GehirnInc/crypt`
+
+Go's standard library has no crypt(3). The output is checked against `openssl passwd -6`
+in a test.

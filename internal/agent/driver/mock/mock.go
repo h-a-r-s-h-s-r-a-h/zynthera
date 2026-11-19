@@ -146,10 +146,21 @@ func (d *Driver) begin(ctx context.Context, op string, delay time.Duration) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if d.fail[op] {
+	d.mu.Lock()
+	failing := d.fail[op]
+	d.mu.Unlock()
+	if failing {
 		return fmt.Errorf("mock: %s failed on purpose (ZYN_MOCK_FAIL)", op)
 	}
 	return nil
+}
+
+// SetFail switches failure injection for one operation on or off while the
+// driver runs. Tests use it to make an operation fail and then recover.
+func (d *Driver) SetFail(op string, failing bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fail[op] = failing
 }
 
 // get returns the VM or driver.ErrNotFound. Callers hold d.mu.
@@ -238,11 +249,11 @@ func (d *Driver) Shutdown(ctx context.Context, id string, _ time.Duration) error
 	if err := d.begin(ctx, "shutdown", d.opts.Delays.Other); err != nil {
 		return err
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.fail["shutdown_timeout"] {
 		return driver.ErrShutdownTimeout
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	v, err := d.get(id)
 	if err != nil {
 		return err

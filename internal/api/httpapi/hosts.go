@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"zynthera/internal/api/heartbeats"
 	"zynthera/internal/api/secrets"
 	"zynthera/internal/api/store/sqlcgen"
 	"zynthera/internal/shared/httpx"
@@ -308,7 +309,7 @@ func (s *server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	const maxInt = 1 << 30
 	if c.TotalRAMMB < 0 || c.TotalVCPUs < 0 || c.TotalDiskGB < 0 || c.FreeDiskGB < 0 ||
 		c.TotalRAMMB > maxInt || c.TotalVCPUs > maxInt || c.TotalDiskGB > maxInt || c.FreeDiskGB > maxInt ||
-		len(hb.AgentVersion) > 40 || len(hb.Images) > 200 {
+		len(hb.AgentVersion) > 40 || len(hb.Images) > 200 || len(hb.VMs) > 5000 {
 		httpx.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", "The heartbeat has values out of range.", nil)
 		return
 	}
@@ -336,6 +337,33 @@ func (s *server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.internal(w, r, "record heartbeat", err)
 		return
+	}
+
+	// Keep the VM list for the reconciler, and refresh the cheap per-VM
+	// facts. VMs in a transitional state are otherwise left alone.
+	reported := make([]vmtypes.VMStatus, 0, len(hb.VMs))
+	for _, vm := range hb.VMs {
+		if vmtypes.IsUUID(vm.ID) {
+			reported = append(reported, vm)
+		}
+	}
+	rec := heartbeats.Record{ReceivedAt: time.Now().UTC(), VMs: reported}
+	if err := heartbeats.Save(r.Context(), s.RDB, host.ID, rec); err != nil {
+		s.internal(w, r, "save heartbeat", err)
+		return
+	}
+	for _, vm := range reported {
+		id, err := uuid.Parse(vm.ID)
+		if err != nil {
+			continue
+		}
+		err = s.Q.UpdateVMFromHeartbeat(r.Context(), sqlcgen.UpdateVMFromHeartbeatParams{
+			ID: id, HostID: host.ID, DiskUsedBytes: max(vm.DiskUsedBytes, 0), ViewerConnected: vm.ViewerConnected,
+		})
+		if err != nil {
+			s.internal(w, r, "update vm from heartbeat", err)
+			return
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
